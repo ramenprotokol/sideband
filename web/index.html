@@ -61,6 +61,7 @@
       </div>
       <dl class="readouts" aria-live="off">
         <div><dt>OUT PEAK</dt><dd id="meter-peak">&mdash;</dd></div>
+        <div><dt>COMPRESSOR</dt><dd id="meter-comp">&mdash;</dd></div>
         <div><dt>LIMITER</dt><dd id="meter-limit">&mdash;</dd></div>
         <div><dt>VOICES</dt><dd id="meter-voices">0 / 8</dd></div>
         <div><dt>SAMPLE RATE</dt><dd id="meter-rate">&mdash;</dd></div>
@@ -96,11 +97,11 @@
       <h2 id="h-algo"><span class="num">4.3</span> ALGORITHM</h2>
       <p class="section-note">An algorithm is the wiring between the six operators. Numbered boxes are operators; a box on the bottom line is a <em>carrier</em> (you hear it), a box above feeds its sine into the one below as <em>frequency modulation</em>. OP6 has a feedback loop in every algorithm.</p>
       <div class="algo-layout">
-        <div class="algo-grid" id="algo-grid" role="radiogroup" aria-labelledby="h-algo"></div>
         <div class="algo-side">
           <div class="fader" id="feedback-fader"></div>
-          <p class="help">Feedback routes OP6 into itself. 0 is a pure sine; 7 approaches a sawtooth.</p>
+          <p class="help">Feedback routes OP6 into itself (the loop with the arrow in every diagram). 0 is a pure sine; 7 approaches a sawtooth.</p>
         </div>
+        <div class="algo-grid" id="algo-grid" role="radiogroup" aria-labelledby="h-algo"></div>
       </div>
     </section>
 
@@ -115,17 +116,19 @@
       <div class="notes-grid">
         <div>
           <h3 class="sub">WHY C</h3>
-          <p>C is the native language of synth firmware and DSP. The engine in <code>src/sideband.c</code> is freestanding C11: no libc, no libm, no heap. Every buffer is static, so the per-sample loop never allocates and always does the same bounded work. Sine comes from a 4096-point table built at start-up from a Taylor series; <code>exp2</code> is a short polynomial. <code>zig cc</code> compiles it to WebAssembly, which runs inside an <em>AudioWorklet</em>, the browser&rsquo;s real-time audio thread, 128 samples at a time. The page itself only draws and sends messages.</p>
+          <p>C is the native language of synth firmware and DSP. The engine in <code>src/sideband.c</code> is freestanding C11: no libc, no libm, no heap. Every buffer is static, so the per-sample loop never allocates and always does a bounded amount of work. Sine comes from a 4096-point table built at start-up from a Taylor series; <code>exp2</code> and <code>log2</code> are short polynomials. Every edit you make while a note sounds is smoothed sample by sample, so faders never click. <code>zig cc</code> compiles it to WebAssembly, which runs inside an <em>AudioWorklet</em>, the browser&rsquo;s real-time audio thread, 128 samples at a time. The page itself only draws and sends messages.</p>
           <p>The same C file also compiles natively for the unit tests, and both builds give bit-identical samples for the same patch and notes.</p>
         </div>
         <div>
           <h3 class="sub">HEARING SAFETY</h3>
           <ul class="spec-list">
+            <li>A slow compressor evens out loudness: one note of a factory voice passes almost untouched, while dense chords and extreme patches are pulled down, so turning up for a quiet voice never makes a loud one jump out.</li>
             <li>A peak limiter holds the synth at or below &minus;3 dBFS.</li>
             <li>After the volume control, a hard ceiling stops anything above &minus;1 dBFS. Output never reaches 0 dBFS.</li>
             <li>Volume starts at &minus;12 dB and fades in from silence; it is never stored in a link.</li>
             <li>Every value in a shared link is checked and clamped, in the page and again in the C engine.</li>
-            <li>The OUT PEAK and LIMITER readouts are measured from the audio thread, not estimated.</li>
+            <li>ALL NOTES OFF fades every voice out over 5 ms, and pausing lets notes ring out first, so neither cuts a sound mid-wave.</li>
+            <li>The OUT PEAK, COMPRESSOR and LIMITER readouts are measured from the audio thread, not estimated.</li>
           </ul>
         </div>
         <div>
@@ -151,7 +154,7 @@
         <span class="oct-readout" id="oct-readout" aria-live="polite">C3</span>
         <button type="button" class="btn small" id="oct-up" aria-label="Octave up">+</button>
       </div>
-      <button type="button" class="btn" id="panic">ALL NOTES OFF</button>
+      <button type="button" class="btn" id="panic" aria-label="All notes off"><span class="label-long">ALL NOTES OFF</span><span class="label-short" aria-hidden="true">ALL OFF</span></button>
       <button type="button" class="btn" id="midi">CONNECT MIDI</button>
       <p class="audio-status" id="audio-status" role="status" aria-live="polite">Audio is off. Press START AUDIO or play a key.</p>
     </div>

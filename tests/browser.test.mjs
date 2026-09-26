@@ -152,6 +152,34 @@ test('phone, 400 px, light theme, reduced motion: no horizontal scroll and a slo
   }
 });
 
+test('phone, strict autoplay: the first tap on a key unlocks audio and sounds that note', { skip: plan.skip }, async () => {
+  if (plan.fail) assert.fail(plan.fail);
+  const page = await chrome.openPage({ width: 400, height: 860, mobile: true, scale: 2, scheme: 'dark' });
+  try {
+    await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    await page.navigate(`${base}?test=1`);
+    await page.waitFor('window.__sideband && document.querySelectorAll(".op").length === 6', 20000);
+    // The policy is really enforced: a context made without a gesture stays suspended.
+    assert.equal(await page.evaluate('(async () => { const c = new AudioContext(); await new Promise((r) => setTimeout(r, 300)); const s = c.state; await c.close(); return s; })()'), 'suspended');
+    // Record what the audio thread reports, so a short note cannot slip between polls.
+    await page.evaluate(`(() => { window.__heard = 0; const e = window.__sideband.engine; const on = e.onMeter; e.onMeter = (m) => { window.__heard = Math.max(window.__heard, m.voices | 0); on(m); }; })()`);
+    // One tap: touchstart creates the context (still suspended), touchend unlocks it.
+    await page.tap('.key.white:nth-child(5)', 120);
+    await page.waitFor('window.__sideband.engine.ctx && window.__sideband.engine.ctx.state === "running"', 10000);
+    await page.waitFor('window.__heard >= 1', 10000);
+    assert.equal(await page.evaluate('window.__sideband.engine.ready'), true);
+    // ...and the voice ends on its own after the short tap.
+    await page.waitFor('document.querySelector("#meter-voices").textContent.startsWith("0 /")', 10000);
+    // A second tap plays straight away.
+    await page.evaluate('window.__heard = 0');
+    await page.tap('.key.white:nth-child(8)', 300);
+    await page.waitFor('window.__heard >= 1', 5000);
+    noProblems(page, 'touch');
+  } finally {
+    await page.close();
+  }
+});
+
 test('a hostile link is clamped, a broken link fails politely, and neither makes noise or errors', { skip: plan.skip }, async () => {
   if (plan.fail) assert.fail(plan.fail);
   const hostile = `#p=1.${bytesToB64url(new Array(PARAM_COUNT).fill(255))}&n=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E`;
@@ -176,7 +204,9 @@ test('a hostile link is clamped, a broken link fails politely, and neither makes
     await new Promise((r) => setTimeout(r, 400));
     const peakText = await page.evaluate('document.querySelector("#meter-peak").textContent');
     assert.ok(-Number(peakText.replace(/[^\d.]/g, '')) <= -1, `peak ${peakText}`);
-    assert.match(await page.evaluate('document.querySelector("#meter-limit").textContent'), /−\d/, 'the limiter is working');
+    // The compressor pulls a patch this dense down (the limiter may or may not
+    // still be catching peaks when the meter is read).
+    assert.match(await page.evaluate('document.querySelector("#meter-comp").textContent'), /−\d/, 'the compressor is working');
     noProblems(page, 'hostile link');
   } finally {
     await page.close();

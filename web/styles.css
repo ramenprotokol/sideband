@@ -49,7 +49,6 @@
   --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   --sans: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
   --gutter: clamp(14px, 3vw, 36px);
-  --algo-scale: 0.95;
   --dock-h: 190px;
 }
 
@@ -288,15 +287,16 @@ h2 .num {
 
 .readouts {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
   margin: 14px 0 0;
+  background: var(--line-soft);
   border: 1px solid var(--line);
 }
 .readouts div {
   padding: 7px 12px 8px;
-  border-right: 1px solid var(--line-soft);
+  background: var(--panel);
 }
-.readouts div:last-child { border-right: 0; }
 .readouts dt {
   font-size: 10px;
   letter-spacing: 0.16em;
@@ -308,7 +308,8 @@ h2 .num {
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
-#meter-limit.active { color: var(--spot); }
+#meter-limit.active,
+#meter-comp.active { color: var(--spot); }
 
 /* ---- buttons ------------------------------------------------------------ */
 
@@ -411,10 +412,16 @@ h2 .num {
 
 .algo-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
-  gap: 24px;
-  align-items: start;
+  gap: 16px;
 }
+.algo-side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 24px;
+}
+.algo-side .fader { flex: 0 1 300px; }
+.algo-side .help { flex: 1 1 320px; margin: 0; max-width: 62ch; }
 .algo-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -423,12 +430,14 @@ h2 .num {
 }
 .algo-card {
   --card-bg: var(--panel);
+  /* The card is the size container the diagrams scale against. */
+  container-type: inline-size;
   display: grid;
   grid-template-rows: 1fr auto auto;
   justify-items: center;
   gap: 3px;
-  min-height: 222px;
-  padding: 12px 6px 10px;
+  min-height: 150px;
+  padding: 24px 6px 10px;
   font: inherit;
   color: var(--ink);
   background: var(--card-bg);
@@ -445,13 +454,22 @@ h2 .num {
 }
 .algo-card:focus-visible { outline-offset: -5px; }
 /* Figures sit on the card's baseline so every output bus lines up, as in a chart. */
-.algo-figure { display: grid; place-items: end center; padding-bottom: 6px; }
-.algo-svg { display: block; height: auto; max-width: 100%; }
-.algo-svg .wire { fill: none; stroke: currentColor; stroke-width: 1.5; }
-.algo-svg .bus { stroke: currentColor; stroke-width: 3; }
-.algo-svg .fb { stroke-dasharray: 3 2; }
-.algo-svg .arrow { fill: currentColor; }
-.algo-svg .opbox rect { fill: var(--card-bg); stroke: currentColor; stroke-width: 1.5; }
+/* Every diagram is drawn at one scale (as on a printed chart): up to 1.72 px
+ * per drawing unit, or less when the widest diagram (ORGAN, 168 units) would
+ * not fit its card. --w is each drawing's width in units, set by panel.js. */
+.algo-figure { display: grid; place-items: end center; width: 100%; padding-bottom: 8px; }
+.algo-svg {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  width: calc(var(--w) * 1px);
+  width: calc(var(--w) * min(1.72px, 100cqw / 168));
+}
+.algo-svg .wire { fill: none; stroke: currentColor; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.algo-svg .bus { stroke: currentColor; stroke-width: 3.5; vector-effect: non-scaling-stroke; }
+.algo-svg .arrow,
+.algo-svg .joint { fill: currentColor; }
+.algo-svg .opbox rect { fill: var(--card-bg); stroke: currentColor; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .algo-svg .opbox text {
   fill: currentColor;
   font: 600 12px var(--mono);
@@ -462,7 +480,6 @@ h2 .num {
 .algo-cap { display: flex; gap: 7px; font-size: 11px; letter-spacing: 0.08em; }
 .algo-num { font-weight: 600; }
 .algo-sub { font-size: 10px; letter-spacing: 0.12em; }
-.algo-side .help { margin-top: 10px; }
 
 /* ---- faders ------------------------------------------------------------- */
 
@@ -719,6 +736,7 @@ h2 .num {
   font-size: 14px;
   color: var(--ink);
 }
+.label-short { display: none; }
 
 .keys {
   max-width: 1320px;
@@ -796,14 +814,11 @@ h2 .num {
   .voice-grid,
   .algo-layout { grid-template-columns: 1fr; }
   .notes-grid { grid-template-columns: 1fr; }
-  .readouts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .readouts div:nth-child(2) { border-right: 0; }
-  .readouts div:nth-child(-n + 2) { border-bottom: 1px solid var(--line-soft); }
-  .algo-side { max-width: 420px; }
+  .readouts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .readouts div:nth-child(4) { grid-column: span 2; }
 }
 
 @media (max-width: 720px) {
-  :root { --algo-scale: 0.74; }
   .algo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .op-grid { grid-template-columns: 1fr; }
   .sheet-head {
@@ -817,21 +832,58 @@ h2 .num {
   .title-block div:last-child { border-right: 0; }
   .title-block dd { font-size: 16px; }
   .title-block dt { font-size: 9px; letter-spacing: 0.08em; }
-  .algo-card { min-height: 0; padding: 10px 4px 8px; }
+  .algo-card { min-height: 0; padding: 16px 4px 8px; }
   .preset-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .preset { min-height: 52px; }
-  .transport { gap: 6px 10px; padding-top: 7px; }
-  .transport .volume { width: auto; flex: 1 1 150px; }
-  .start { min-width: 0; flex: 1 1 120px; }
+  /* A compact dock: one row of buttons, the volume on a single line, a
+   * shorter keybed. The status line only shows when something went wrong
+   * (it stays in the accessibility tree either way). */
+  .transport { gap: 6px 8px; padding: 6px var(--gutter) 5px; }
+  .start { min-width: 0; flex: 1 1 96px; order: 1; }
+  .octave { order: 2; gap: 4px; }
+  #panic { order: 3; }
+  .label-long { display: none; }
+  .label-short { display: inline; }
+  .transport .volume {
+    order: 4;
+    flex: 1 1 100%;
+    width: auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .transport .volume .fader-input { grid-column: 2; grid-row: 1; height: 20px; }
+  .transport .volume .fader-value { grid-column: 3; grid-row: 1; min-width: 64px; }
   .audio-status { flex-basis: 100%; font-size: 13px; order: 5; }
+  .audio-status:not(.alert) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
   #midi { display: none; }
-  .keys-inner { height: 70px; }
-  .key { font-size: 10px; }
+  .keys { padding-bottom: 8px; }
+  .keys-inner { height: 56px; }
+  .key { font-size: 10px; padding-bottom: 4px; }
+  .key.black { padding-bottom: 3px; }
+  .key-octave { display: none; }
+}
+
+/* Short screens (a laptop at 1280 x 800): a lower keybed and tighter
+ * transport, so the dock leaves the output monitor in view. */
+@media (max-height: 860px) and (min-width: 721px) {
+  .transport { padding-top: 6px; padding-bottom: 6px; }
+  .keys { padding-bottom: 7px; }
+  .keys-inner { height: 62px; }
+  .key { padding-bottom: 4px; }
   .key-octave { display: none; }
 }
 
 @media (max-width: 420px) {
   .transport .btn { padding: 6px 8px; font-size: 11px; }
+  .readouts div { padding: 6px 8px 7px; }
+  .readouts dd { font-size: 15px; }
   .op { padding: 16px 10px 20px; }
   .op-eg-faders { column-gap: 8px; }
 }

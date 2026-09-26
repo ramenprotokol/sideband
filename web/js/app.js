@@ -43,8 +43,11 @@ function message(text, { sticky = false } = {}) {
   clearTimeout(messageTimer);
   if (!sticky && text) messageTimer = setTimeout(() => { m.textContent = ''; }, 8000);
 }
-function audioStatus(text) {
-  $('audio-status').textContent = text;
+// alert: also show the line on phones, where the dock hides routine status.
+function audioStatus(text, { alert = false } = {}) {
+  const el = $('audio-status');
+  el.textContent = text;
+  el.classList.toggle('alert', alert);
 }
 
 // ---- audio ----------------------------------------------------------------
@@ -63,6 +66,10 @@ const engine = new AudioEngine({
     const limit = $('meter-limit');
     limit.textContent = gr < -0.05 ? `${MINUS}${Math.abs(gr).toFixed(1)} dB` : '0.0 dB';
     limit.classList.toggle('active', gr < -0.05);
+    const cr = 20 * Math.log10(Math.max(1e-6, Number(m.comp)));
+    const comp = $('meter-comp');
+    comp.textContent = cr < -0.05 ? `${MINUS}${Math.abs(cr).toFixed(1)} dB` : '0.0 dB';
+    comp.classList.toggle('active', cr < -0.05);
     $('meter-voices').textContent = `${m.voices | 0} / 8`;
   },
   onState(s) {
@@ -72,6 +79,10 @@ const engine = new AudioEngine({
       start.setAttribute('aria-pressed', 'true');
       start.classList.add('on');
       audioStatus(`Audio is on at ${(engine.sampleRate / 1000).toFixed(1)} kHz. Play the keys.`);
+      playPending();
+    } else if (s === 'pausing') {
+      start.textContent = 'PAUSING…';
+      audioStatus('Letting the notes ring out, then pausing.');
     } else if (s === 'suspended') {
       start.textContent = 'AUDIO PAUSED';
       start.setAttribute('aria-pressed', 'false');
@@ -80,7 +91,7 @@ const engine = new AudioEngine({
     } else if (s === 'error') {
       start.textContent = 'START AUDIO';
       start.classList.remove('on');
-      audioStatus('The audio thread stopped with an error. Reload the page to start again.');
+      audioStatus('The audio thread stopped with an error. Reload the page to start again.', { alert: true });
     }
   },
 });
@@ -98,6 +109,26 @@ window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change',
 
 let keyboard = null;
 
+// Notes played before the audio is running: the very first key press starts
+// the audio, and on touch screens the browser only lets it run once the
+// finger lifts. Those notes are kept here and played the moment it runs; a
+// note already released is played for about as long as it was held.
+const pending = new Map(); // note -> { velocity, down, up }
+const offTimers = new Map(); // note -> timer for a replayed short tap
+
+function playPending() {
+  if (!engine.running) return;
+  for (const [note, p] of pending) {
+    clearTimeout(offTimers.get(note));
+    engine.noteOn(note, p.velocity);
+    if (p.up !== null) {
+      const ms = Math.min(600, Math.max(150, p.up - p.down));
+      offTimers.set(note, setTimeout(() => { offTimers.delete(note); engine.noteOff(note); }, ms));
+    }
+  }
+  pending.clear();
+}
+
 async function startAudio() {
   if (engine.ready) return;
   audioStatus('Starting audio…');
@@ -105,27 +136,29 @@ async function startAudio() {
     await engine.start();
     monitor.attach(engine.analyser, engine.sampleRate);
     $('meter-rate').textContent = `${(engine.sampleRate / 1000).toFixed(1)} kHz`;
-    // Keys pressed while the audio was starting sound now.
-    for (const note of new Set(keyboard.held.values())) engine.noteOn(note, 100);
+    playPending();
   } catch (e) {
-    audioStatus(`Audio could not start: ${e.message}`);
+    pending.clear();
+    audioStatus(`Audio could not start: ${e.message}`, { alert: true });
   }
 }
 
-$('start').addEventListener('click', async () => {
+// Unlock on the events touch browsers treat as activation. Capture phase, so
+// it runs before anything else sees the event.
+for (const type of ['pointerup', 'touchend', 'keydown', 'click']) {
+  document.addEventListener(type, () => engine.unlock(), { capture: true, passive: true });
+}
+
+$('start').addEventListener('click', () => {
   if (!engine.ready) return startAudio();
-  if (engine.ctx.state === 'running') {
-    engine.allNotesOff();
-    await engine.ctx.suspend();
-  } else {
-    await engine.ctx.resume();
-  }
-  engine.emitState();
+  if (engine.ctx.state === 'running' && !engine.userPaused) return engine.pause();
+  return engine.resume();
 });
 
 $('panic').addEventListener('click', () => {
+  pending.clear();
   keyboard.releaseAll();
-  engine.panic();
+  engine.panic(); // a 5 ms fade, not a cut
   message('All notes stopped.');
 });
 
@@ -263,14 +296,21 @@ if (!loadFromHash({ initial: true })) syncAll();
 
 keyboard = new Keyboard($('keys'), {
   onNoteOn(note, velocity) {
-    if (!engine.ready) {
-      startAudio();
-      return; // startAudio() plays held keys once the engine is up
+    clearTimeout(offTimers.get(note));
+    offTimers.delete(note);
+    if (!engine.running || engine.userPaused) {
+      pending.set(note, { velocity, down: performance.now(), up: null });
+      if (!engine.ready) startAudio();
+      else engine.resume(); // playing a key while paused resumes
+      return;
     }
-    if (engine.ctx.state !== 'running') engine.ctx.resume().then(() => engine.emitState());
     engine.noteOn(note, velocity);
   },
-  onNoteOff(note) { engine.noteOff(note); },
+  onNoteOff(note) {
+    const p = pending.get(note);
+    if (p) p.up = performance.now();
+    else engine.noteOff(note);
+  },
   onOctave(base) { $('oct-readout').textContent = noteName(base); },
 });
 $('oct-down').addEventListener('click', () => keyboard.shift(-1));

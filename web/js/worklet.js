@@ -8,6 +8,11 @@
 
 const BLOCK = 128;
 const PARAMS = 80;
+// The engine's supported range (SIDEBAND_MIN_RATE..SIDEBAND_MAX_RATE). Outside
+// it the engine would clamp the rate and every note would play out of tune,
+// so the worklet refuses to start instead.
+const MIN_RATE = 8000;
+const MAX_RATE = 384000;
 
 class SidebandProcessor extends AudioWorkletProcessor {
   constructor(options) {
@@ -16,8 +21,14 @@ class SidebandProcessor extends AudioWorkletProcessor {
     this.pos = BLOCK;
     this.blocks = 0;
     this.minGain = 1;
+    this.minComp = 1;
     this.meterEvery = Math.max(1, Math.round(sampleRate / 20 / BLOCK)); // ~20 meter messages a second
+    // One meter object, reused for every message (postMessage copies it).
+    this.meter = { type: 'meter', peak: 0, gain: 1, comp: 1, voices: 0 };
     try {
+      if (!(sampleRate >= MIN_RATE && sampleRate <= MAX_RATE)) {
+        throw new Error(`the audio device runs at ${(sampleRate / 1000).toFixed(1)} kHz, and sideband supports ${MIN_RATE / 1000} to ${MAX_RATE / 1000} kHz`);
+      }
       const bytes = options && options.processorOptions && options.processorOptions.wasm;
       const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes), {});
       this.x = instance.exports;
@@ -65,10 +76,15 @@ class SidebandProcessor extends AudioWorkletProcessor {
     }
   }
 
+  // The audio callback. It allocates nothing: samples are copied with plain
+  // loops (no subarray views), and the only object it touches is the reused
+  // meter above, posted about 20 times a second.
   process(_inputs, outputs) {
     if (!this.ok) return true; // outputs stay zero-filled: silence
     const main = outputs[0];
-    const mon = outputs[1];
+    const mon = outputs[1] && outputs[1][0];
+    const out = this.out;
+    const tap = this.mon;
     const n = main[0].length;
     let written = 0;
     while (written < n) {
@@ -76,25 +92,31 @@ class SidebandProcessor extends AudioWorkletProcessor {
         this.x.sideband_render();
         const g = this.x.sideband_gain_reduction();
         if (g < this.minGain) this.minGain = g;
+        const c = this.x.sideband_comp_gain();
+        if (c < this.minComp) this.minComp = c;
         this.pos = 0;
         this.blocks++;
       }
       const take = Math.min(BLOCK - this.pos, n - written);
-      const src = this.out.subarray(this.pos, this.pos + take);
-      for (let c = 0; c < main.length; c++) main[c].set(src, written);
-      if (mon && mon[0]) mon[0].set(this.mon.subarray(this.pos, this.pos + take), written);
+      const from = this.pos;
+      for (let c = 0; c < main.length; c++) {
+        const ch = main[c];
+        for (let i = 0; i < take; i++) ch[written + i] = out[from + i];
+      }
+      if (mon) for (let i = 0; i < take; i++) mon[written + i] = tap[from + i];
       this.pos += take;
       written += take;
     }
     if (this.blocks >= this.meterEvery) {
       this.blocks = 0;
-      this.port.postMessage({
-        type: 'meter',
-        peak: this.x.sideband_take_peak(),
-        gain: this.minGain,
-        voices: this.x.sideband_active_voices(),
-      });
+      const m = this.meter;
+      m.peak = this.x.sideband_take_peak();
+      m.gain = this.minGain;
+      m.comp = this.minComp;
+      m.voices = this.x.sideband_active_voices();
+      this.port.postMessage(m);
       this.minGain = 1;
+      this.minComp = 1;
     }
     return true;
   }

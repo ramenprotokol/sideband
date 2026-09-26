@@ -2,6 +2,8 @@
 // gesture, loads the worklet and the WASM, and forwards messages. No DSP here.
 
 const READY_TIMEOUT_MS = 8000;
+const PAUSE_TAIL_MS = 1000; // how long a pause waits for release tails to finish
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Fetch the WASM early (it is small) so pressing Start is quick.
 let wasmBytes = null;
@@ -29,6 +31,10 @@ export class AudioEngine {
     this.sampleRate = 0;
     this.patch = null;
     this.volume = 0.25;
+    this.voices = 0;       // from the audio thread's meter messages
+    this.meterSeq = 0;     // counts meter messages, to wait for a fresh one
+    this.userPaused = false;
+    this.pauseToken = 0;   // a newer pause or resume cancels an older pause
   }
 
   get running() {
@@ -38,7 +44,7 @@ export class AudioEngine {
   // Must be called from a user gesture (click, key or touch).
   start() {
     if (this.ready) {
-      if (this.ctx.state !== 'running') return this.ctx.resume().then(() => this.emitState());
+      if (this.ctx.state !== 'running') return this.resume();
       return Promise.resolve();
     }
     if (!this.starting) {
@@ -87,7 +93,11 @@ export class AudioEngine {
     });
     node.port.onmessage = (e) => {
       const m = e.data;
-      if (m && m.type === 'meter') this.onMeter(m);
+      if (m && m.type === 'meter') {
+        this.voices = m.voices | 0;
+        this.meterSeq++;
+        this.onMeter(m);
+      }
     };
     node.onprocessorerror = () => {
       this.ready = false;
@@ -121,6 +131,47 @@ export class AudioEngine {
 
   emitState(force) {
     this.onState(force ?? (this.ready ? this.ctx.state : 'off'));
+  }
+
+  // Touch browsers only count pointerup/touchend (and keys and clicks) as
+  // user activation, not pointerdown. A context created on pointerdown stays
+  // suspended; the page calls this on those later events to let it run.
+  // It never undoes a pause the player chose.
+  unlock() {
+    if (!this.ctx || this.userPaused || this.ctx.state !== 'suspended') return;
+    this.ctx.resume().then(() => this.emitState(), () => {});
+  }
+
+  // The player resumes (START again, or a key while paused).
+  resume() {
+    this.userPaused = false;
+    this.pauseToken++;
+    if (!this.ctx) return Promise.resolve();
+    return this.ctx.resume().then(() => this.emitState(), () => {});
+  }
+
+  // Pausing lets notes finish their release (up to a second), fades out
+  // anything still sounding over 5 ms, and only then suspends the context,
+  // so a pause never cuts a sound mid-wave.
+  async pause() {
+    if (!this.ready || this.ctx.state !== 'running') return;
+    const token = ++this.pauseToken;
+    this.userPaused = true;
+    this.emitState('pausing');
+    this.allNotesOff();
+    const seq = this.meterSeq;
+    const end = performance.now() + PAUSE_TAIL_MS;
+    while (performance.now() < end && (this.meterSeq <= seq + 1 || this.voices > 0)) {
+      await sleep(40);
+      if (token !== this.pauseToken) return;
+    }
+    if (this.voices > 0) {
+      this.panic();
+      await sleep(30);
+      if (token !== this.pauseToken) return;
+    }
+    await this.ctx.suspend();
+    if (token === this.pauseToken) this.emitState();
   }
 
   post(message) {

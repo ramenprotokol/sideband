@@ -223,7 +223,7 @@ export function buildAlgorithms(container, onSelect) {
     const figure = el('span', 'algo-figure');
     figure.innerHTML = algorithmSVG(i); // generated from constants, no user input
     const svg = figure.querySelector('svg');
-    svg.style.width = `calc(${svg.dataset.w}px * var(--algo-scale))`;
+    svg.style.setProperty('--w', svg.dataset.w); // CSS sizes every diagram at one scale
     const cap = el('span', 'algo-cap');
     cap.append(el('span', 'algo-num', `ALG ${i + 1}`), el('span', 'algo-name', a.name));
     const sub = el('span', 'algo-sub', `${carriers} CARRIER${carriers > 1 ? 'S' : ''}`);

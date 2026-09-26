@@ -2,7 +2,7 @@
 // screenshots. It launches headless Chrome on a random debugging port with
 // audio muted, opens pages with exact device emulation (headless Chrome will
 // not shrink a real window below 500 px), sends trusted mouse and key events
-// (so they count as user gestures for Web Audio), and records console errors,
+// (so they count as user gestures for Web Audio) and touch taps, and records console errors,
 // uncaught exceptions and failed loads.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -40,6 +40,9 @@ export async function launchChrome(chromePath) {
     '--disable-extensions',
     '--hide-scrollbars',
     '--mute-audio',
+    // The autoplay rule real browsers apply: audio may only start after a
+    // user activation, and on touch that means touchend, not touchstart.
+    '--autoplay-policy=document-user-activation-required',
     '--force-color-profile=srgb',
     'about:blank',
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -132,6 +135,14 @@ export async function launchChrome(chromePath) {
         await s('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 });
       }
     };
+    // A touch tap (needs Emulation.setTouchEmulationEnabled) in the middle of
+    // the element, held for `holdMs`.
+    const tap = async (selector, holdMs = 120) => {
+      const box = await evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height * 0.8 }; })()`);
+      await s('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x, y: box.y }] });
+      await new Promise((r) => setTimeout(r, holdMs));
+      await s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    };
     // key is the DOM key value ('z', 'ArrowRight'); printable keys also send text.
     const key = async (type, code, keyValue) => {
       const printable = typeof keyValue === 'string' && keyValue.length === 1;
@@ -143,6 +154,7 @@ export async function launchChrome(chromePath) {
       waitFor,
       navigate,
       click,
+      tap,
       key,
       send: s,
       screenshot: async (full = false) => {

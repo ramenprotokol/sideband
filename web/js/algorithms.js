@@ -43,9 +43,12 @@ export function roleOf(algo, op) {
   return { carrier: a.carriers.includes(n), to, from, feedback: n === FEEDBACK_OP };
 }
 
-const PITCH_X = 27;
+const PITCH_X = 24;
 const PITCH_Y = 24;
 const BOX = 18;
+const PAD_L = 8;
+const PAD_R = 16; // room for OP6's feedback loop
+const MIN_BUS = 36; // even a single carrier gets a drawn output bus
 
 // An SVG line drawing of one algorithm. Pure string building (no DOM), so the
 // Node tests can check it too. Colours come from CSS (currentColor).
@@ -53,14 +56,14 @@ export function algorithmSVG(algo, { title } = {}) {
   const a = ALGORITHMS[algo];
   const cols = Math.max(...Object.values(a.pos).map(([c]) => c)) + 1;
   const rows = Math.max(...Object.values(a.pos).map(([, r]) => r)) + 1;
-  const padX = 18;
-  const top = 16;
-  const width = Math.max(cols * PITCH_X + padX * 2, 3 * PITCH_X + padX * 2);
-  const offsetX = (width - cols * PITCH_X) / 2;
+  const top = 14;
+  const width = Math.max(cols, 3) * PITCH_X + PAD_L + PAD_R;
+  const offsetX = PAD_L + (width - PAD_L - PAD_R - cols * PITCH_X) / 2;
   const busY = top + rows * PITCH_Y + 6;
-  const height = busY + 18;
+  const height = busY + 16;
   const cx = (op) => offsetX + a.pos[op][0] * PITCH_X + PITCH_X / 2;
   const cy = (op) => top + (rows - 1 - a.pos[op][1]) * PITCH_Y + PITCH_Y / 2;
+  const arrowDown = (x, tipY) => `<path class="arrow" d="M${x - 3},${tipY - 5} L${x + 3},${tipY - 5} L${x},${tipY} Z"/>`;
   const parts = [];
 
   // Modulation wires: from the bottom of the source to the top of the target.
@@ -75,20 +78,24 @@ export function algorithmSVG(algo, { title } = {}) {
       parts.push(`<polyline class="wire" points="${x1},${y1} ${x1},${jy} ${x2},${jy} ${x2},${y2}"/>`);
     }
   }
-  // Carriers drop onto the output bus.
+  // Carriers drop onto the output bus, which leads to the output arrow.
   const carrierXs = a.carriers.map(cx);
   for (const c of a.carriers) parts.push(`<line class="wire" x1="${cx(c)}" y1="${cy(c) + BOX / 2}" x2="${cx(c)}" y2="${busY}"/>`);
-  const busL = Math.min(...carrierXs), busR = Math.max(...carrierXs);
-  const outX = (busL + busR) / 2;
-  parts.push(`<line class="bus" x1="${busL - 4}" y1="${busY}" x2="${busR + 4}" y2="${busY}"/>`);
-  parts.push(`<line class="wire" x1="${outX}" y1="${busY}" x2="${outX}" y2="${busY + 7}"/>`);
-  parts.push(`<path class="arrow" d="M${outX - 3.5},${busY + 6} L${outX + 3.5},${busY + 6} L${outX},${busY + 11} Z"/>`);
+  const outX = (Math.min(...carrierXs) + Math.max(...carrierXs)) / 2;
+  const busL = Math.min(Math.min(...carrierXs) - 4, outX - MIN_BUS / 2);
+  const busR = Math.max(Math.max(...carrierXs) + 4, outX + MIN_BUS / 2);
+  parts.push(`<line class="bus" x1="${busL}" y1="${busY}" x2="${busR}" y2="${busY}"/>`);
+  parts.push(`<line class="wire" x1="${outX}" y1="${busY}" x2="${outX}" y2="${busY + 6}"/>`);
+  parts.push(arrowDown(outX, busY + 12));
 
-  // Feedback loop on OP6: out of the right side, up and back into the top.
+  // Feedback loop on OP6: out of its right side, up over the box and back
+  // down into its top, with an arrowhead where it re-enters.
   {
     const x = cx(FEEDBACK_OP), y = cy(FEEDBACK_OP);
-    const r = x + BOX / 2 + 6, t = y - BOX / 2 - 6;
-    parts.push(`<polyline class="wire fb" points="${x + BOX / 2},${y} ${r},${y} ${r},${t} ${x},${t} ${x},${y - BOX / 2}"/>`);
+    const r = x + BOX / 2 + 7, t = y - BOX / 2 - 8;
+    parts.push(`<circle class="joint" cx="${x + BOX / 2 + 3}" cy="${y}" r="1.6"/>`);
+    parts.push(`<polyline class="wire fb" points="${x + BOX / 2},${y} ${r},${y} ${r},${t} ${x},${t} ${x},${y - BOX / 2 - 5}"/>`);
+    parts.push(arrowDown(x, y - BOX / 2));
   }
   // Operator boxes, drawn last so wires tuck under them.
   for (let op = 1; op <= 6; op++) {
