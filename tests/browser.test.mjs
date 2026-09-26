@@ -1,0 +1,229 @@
+// End-to-end checks of the built dist/ in headless Chrome (audio muted):
+// no console errors at desktop and true 400 px phone width, in both themes and
+// with reduced motion; Start really starts the AudioWorklet (the worklet's own
+// meter messages prove the C engine is rendering); keys play; links load,
+// clamp and fail politely; MIDI denial is handled. window.__opsix is exposed
+// only with ?test=1 or under automation.
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { serve } from '../scripts/serve.mjs';
+import { browserPlan, findChrome, launchChrome } from './cdp.mjs';
+import { dist } from './helpers.mjs';
+import { PARAM_COUNT, bytesToB64url } from '../web/js/patch.js';
+
+const chromePath = findChrome();
+const plan = browserPlan(chromePath);
+let server;
+let chrome;
+let base;
+
+before(async () => {
+  if (!plan.run) return;
+  server = await serve(dist, 0);
+  base = `http://127.0.0.1:${server.address().port}/`;
+  chrome = await launchChrome(chromePath);
+});
+
+after(async () => {
+  await chrome?.close();
+  await new Promise((r) => (server ? server.close(r) : r()));
+});
+
+async function open(opts, hash = '') {
+  const page = await chrome.openPage(opts);
+  await page.navigate(`${base}?test=1${hash}`);
+  await page.waitFor('window.__opsix && document.querySelectorAll(".op").length === 6', 20000);
+  return page;
+}
+
+function noProblems(page, label) {
+  assert.deepEqual(page.problems, [], `${label}: ${JSON.stringify(page.problems)}`);
+}
+
+const layout = `JSON.stringify({
+  scrollW: document.documentElement.scrollWidth,
+  clientW: document.documentElement.clientWidth,
+  theme: document.documentElement.dataset.theme,
+  ops: document.querySelectorAll('.op').length,
+  cards: document.querySelectorAll('.algo-card[role=radio]').length,
+  faders: document.querySelectorAll('input[type=range]').length,
+  keys: document.querySelectorAll('.key').length,
+  checked: document.querySelector('.algo-card[aria-checked=true]')?.dataset.algo,
+  preset: document.querySelector('.preset[aria-pressed=true] .preset-name')?.textContent,
+  volume: document.querySelector('#volume').value,
+  volumeText: document.querySelector('.volume .fader-value').textContent,
+  idle: document.querySelector('#scope-idle').hidden,
+  hash: location.hash,
+})`;
+
+test('desktop: loads clean, Start runs the C engine in the AudioWorklet, keys play', { skip: plan.skip }, async () => {
+  if (plan.fail) assert.fail(plan.fail);
+  const page = await open({ width: 1280, height: 800, scheme: 'dark' });
+  try {
+    const l = JSON.parse(await page.evaluate(layout));
+    assert.equal(l.scrollW, l.clientW, 'no horizontal scroll');
+    assert.equal(l.theme, 'dark');
+    assert.equal(l.ops, 6);
+    assert.equal(l.cards, 8);
+    assert.equal(l.faders, 6 * 12 + 2, '72 operator faders + feedback + volume');
+    assert.equal(l.keys, 24);
+    assert.equal(l.checked, '0');
+    assert.equal(l.preset, 'E.PIANO');
+    assert.equal(l.volume, '50');
+    assert.equal(l.volumeText, '−12.0 dB');
+    assert.equal(l.hash, '', 'no link is written until the voice changes');
+    assert.equal(await page.evaluate('window.__opsix.engine.ready'), false, 'no audio before a gesture');
+
+    await page.click('#start');
+    await page.waitFor('window.__opsix.engine.ready', 15000);
+    await page.waitFor('window.__opsix.engine.ctx.state === "running"', 10000);
+    assert.match(await page.evaluate('document.querySelector("#start").textContent'), /AUDIO ON/);
+    assert.equal(await page.evaluate('document.querySelector("#scope-idle").hidden'), true);
+
+    await page.key('keyDown', 'KeyZ', 'z');
+    await page.key('keyDown', 'KeyC', 'c');
+    // The meter comes from the audio thread: proof the WASM engine renders.
+    await page.waitFor('document.querySelector("#meter-voices").textContent.startsWith("2 /")', 10000);
+    await page.waitFor(`(() => { const a = window.__opsix.engine.analyser; const b = new Float32Array(a.fftSize); a.getFloatTimeDomainData(b); return b.some((v) => Math.abs(v) > 0.01); })()`, 10000);
+    await page.waitFor('/dBFS/.test(document.querySelector("#meter-peak").textContent)', 10000);
+    const peakText = await page.evaluate('document.querySelector("#meter-peak").textContent');
+    const peakDb = -Number(peakText.replace(/[^\d.]/g, ''));
+    assert.ok(peakDb <= -1, `measured output peak ${peakText} must stay below the -1 dBFS ceiling`);
+    assert.ok(await page.evaluate('window.__opsix.monitor.frames') > 0, 'the scope is drawing');
+
+    await page.key('keyUp', 'KeyZ', 'z');
+    await page.key('keyUp', 'KeyC', 'c');
+    await page.waitFor('document.querySelector("#meter-voices").textContent.startsWith("0 /")', 10000);
+
+    // Editing a fader updates the link in the address bar.
+    await page.evaluate(`(() => { const f = document.querySelector('#op2-level'); f.value = '40'; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await page.waitFor('location.hash.startsWith("#p=1.")', 3000);
+    assert.equal(await page.evaluate('window.__opsix.state.values[2 + 13 + 4]'), 40);
+    assert.equal(await page.evaluate('document.querySelector(".preset[aria-pressed=true]")'), null);
+
+    // The algorithm chart is a keyboard radio group.
+    await page.evaluate('document.querySelector(".algo-card[aria-checked=true]").focus()');
+    await page.key('keyDown', 'ArrowRight', 'ArrowRight');
+    await page.key('keyUp', 'ArrowRight', 'ArrowRight');
+    assert.equal(await page.evaluate('window.__opsix.state.values[0]'), 1);
+    assert.equal(await page.evaluate('document.activeElement.dataset.algo'), '1');
+    assert.match(await page.evaluate('document.querySelector("#op1 .pin-in").textContent'), /OP2/);
+
+    // Volume: the fader sets the engine's gain; the default is restored on reload.
+    await page.evaluate(`(() => { const f = document.querySelector('#volume'); f.value = '0'; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    assert.equal(await page.evaluate('window.__opsix.engine.volume'), 0);
+    assert.equal(await page.evaluate('document.querySelector(".volume .fader-value").textContent'), 'OFF');
+
+    // All notes off and pause work without errors.
+    await page.click('#panic');
+    await page.click('#start');
+    await page.waitFor('window.__opsix.engine.ctx.state === "suspended"', 5000);
+    await page.click('#start');
+    await page.waitFor('window.__opsix.engine.ctx.state === "running"', 5000);
+    noProblems(page, 'desktop');
+  } finally {
+    await page.close();
+  }
+});
+
+test('phone, 400 px, light theme, reduced motion: no horizontal scroll and a slowed scope', { skip: plan.skip }, async () => {
+  if (plan.fail) assert.fail(plan.fail);
+  const page = await open({ width: 400, height: 860, mobile: true, scale: 2, scheme: 'light', reducedMotion: true });
+  try {
+    const l = JSON.parse(await page.evaluate(layout));
+    assert.equal(l.clientW, 400);
+    assert.equal(l.scrollW, l.clientW, 'no horizontal scroll at 400 px');
+    assert.equal(l.theme, 'light');
+    assert.ok(await page.evaluate('window.__opsix.monitor.interval') > 0, 'reduced motion throttles the scope');
+    // A key press is enough to start audio (it is a user gesture).
+    await page.key('keyDown', 'KeyQ', 'q');
+    await page.waitFor('window.__opsix.engine.ready', 15000);
+    await page.waitFor('document.querySelector("#meter-voices").textContent.startsWith("1 /")', 10000);
+    await page.key('keyUp', 'KeyQ', 'q');
+    // Every control stays inside the viewport.
+    const overflow = await page.evaluate(`[...document.querySelectorAll('button, input, .op, .algo-card, .crt')].filter((e) => { const r = e.getBoundingClientRect(); return r.width && (r.left < -1 || r.right > 401); }).map((e) => e.id || e.className)`);
+    assert.deepEqual(overflow, []);
+    // Theme toggle switches to the teal panel.
+    await page.click('#theme-toggle');
+    assert.equal(await page.evaluate('document.documentElement.dataset.theme'), 'dark');
+    noProblems(page, 'phone');
+  } finally {
+    await page.close();
+  }
+});
+
+test('a hostile link is clamped, a broken link fails politely, and neither makes noise or errors', { skip: plan.skip }, async () => {
+  if (plan.fail) assert.fail(plan.fail);
+  const hostile = `#p=1.${bytesToB64url(new Array(PARAM_COUNT).fill(255))}&n=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E`;
+  let page = await open({ width: 1024, height: 768, scheme: 'dark' }, hostile);
+  try {
+    const message = await page.evaluate('document.querySelector("#message").textContent');
+    assert.match(message, /80 values were out of range/);
+    const inRange = await page.evaluate(`window.__opsix.state.values.every((v, id) => {
+      const f = id === 0 ? 7 : id === 1 ? 7 : [1, 31, 99, 20, 99, 99, 99, 99, 99, 99, 99, 99, 99][(id - 2) % 13];
+      return v === f; })`);
+    assert.ok(inRange, 'every value clamped to its maximum');
+    assert.equal(await page.evaluate('document.querySelector("#patch-name").value'), 'IMG SRCX ONERROR');
+    assert.equal(await page.evaluate('document.querySelectorAll("img").length'), 0);
+    // Even this patch, at full volume with a chord, is measured under the ceiling.
+    await page.click('#start');
+    await page.waitFor('window.__opsix.engine.ready', 15000);
+    await page.evaluate(`(() => { const f = document.querySelector('#volume'); f.value = '100'; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    for (const [c, t] of [['KeyZ', 'z'], ['KeyX', 'x'], ['KeyC', 'c'], ['KeyV', 'v'], ['KeyB', 'b'], ['KeyN', 'n'], ['KeyM', 'm'], ['KeyQ', 'q'], ['KeyW', 'w']]) {
+      await page.key('keyDown', c, t);
+    }
+    await page.waitFor('document.querySelector("#meter-voices").textContent.startsWith("8 /")', 10000);
+    await new Promise((r) => setTimeout(r, 400));
+    const peakText = await page.evaluate('document.querySelector("#meter-peak").textContent');
+    assert.ok(-Number(peakText.replace(/[^\d.]/g, '')) <= -1, `peak ${peakText}`);
+    assert.match(await page.evaluate('document.querySelector("#meter-limit").textContent'), /−\d/, 'the limiter is working');
+    noProblems(page, 'hostile link');
+  } finally {
+    await page.close();
+  }
+
+  page = await open({ width: 1024, height: 768, scheme: 'dark' }, '#p=1.not-a-patch');
+  try {
+    const message = await page.evaluate('document.querySelector("#message").textContent');
+    assert.match(message, /107/);
+    assert.match(message, /Loaded E\.PIANO instead/);
+    assert.equal(await page.evaluate('location.hash'), '');
+    noProblems(page, 'broken link');
+  } finally {
+    await page.close();
+  }
+
+  page = await open({ width: 1024, height: 768, scheme: 'dark' }, `#p=${'1'.repeat(400)}`);
+  try {
+    assert.match(await page.evaluate('document.querySelector("#message").textContent'), /too long/);
+    noProblems(page, 'long link');
+  } finally {
+    await page.close();
+  }
+});
+
+test('MIDI: a declined permission gives a clear message and the keyboard still works', { skip: plan.skip }, async () => {
+  if (plan.fail) assert.fail(plan.fail);
+  const page = await open({ width: 1280, height: 800, scheme: 'dark' });
+  try {
+    const origin = new URL(base).origin;
+    await chrome.send('Browser.setPermission', { permission: { name: 'midi' }, setting: 'denied', origin });
+    await page.click('#midi');
+    await page.waitFor('/MIDI/.test(document.querySelector("#message").textContent)', 10000);
+    const message = await page.evaluate('document.querySelector("#message").textContent');
+    assert.match(message, /declined|does not offer|could not start/);
+    await page.waitFor('window.__opsix.engine.ready', 15000);
+    await page.key('keyDown', 'KeyN', 'n');
+    await page.waitFor('document.querySelector("#meter-voices").textContent.startsWith("1 /")', 10000);
+    // Shifting the octave while a key is held still releases the right note.
+    await page.key('keyDown', 'Equal', '=');
+    await page.key('keyUp', 'Equal', '=');
+    assert.equal(await page.evaluate('document.querySelector("#oct-readout").textContent'), 'C4');
+    await page.key('keyUp', 'KeyN', 'n');
+    await page.waitFor('document.querySelector("#meter-voices").textContent.startsWith("0 /")', 10000);
+    assert.equal(await page.evaluate('document.querySelectorAll(".key.down").length'), 0);
+    noProblems(page, 'midi');
+  } finally {
+    await page.close();
+  }
+});
