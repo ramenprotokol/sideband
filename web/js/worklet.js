@@ -9,7 +9,7 @@
 const BLOCK = 128;
 const PARAMS = 80;
 
-class OpSixProcessor extends AudioWorkletProcessor {
+class SidebandProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     this.ok = false;
@@ -21,12 +21,12 @@ class OpSixProcessor extends AudioWorkletProcessor {
       const bytes = options && options.processorOptions && options.processorOptions.wasm;
       const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes), {});
       this.x = instance.exports;
-      this.x.opsix_init(sampleRate);
+      this.x.sideband_init(sampleRate);
       const mem = this.x.memory.buffer; // fixed size: the module can never grow it
-      this.out = new Float32Array(mem, this.x.opsix_render(), BLOCK);
-      this.mon = new Float32Array(mem, this.x.opsix_monitor(), BLOCK);
+      this.out = new Float32Array(mem, this.x.sideband_render(), BLOCK);
+      this.mon = new Float32Array(mem, this.x.sideband_monitor(), BLOCK);
       this.ok = true;
-      this.port.postMessage({ type: 'ready', sampleRate: this.x.opsix_sample_rate() });
+      this.port.postMessage({ type: 'ready', sampleRate: this.x.sideband_sample_rate() });
     } catch (e) {
       this.port.postMessage({ type: 'error', message: String((e && e.message) || e) });
     }
@@ -39,26 +39,26 @@ class OpSixProcessor extends AudioWorkletProcessor {
     switch (m.type) {
       case 'patch':
         if (Array.isArray(m.values) && m.values.length === PARAMS) {
-          for (let id = 0; id < PARAMS; id++) x.opsix_set_param(id, Number(m.values[id]));
+          for (let id = 0; id < PARAMS; id++) x.sideband_set_param(id, Number(m.values[id]));
         }
         break;
       case 'param':
-        x.opsix_set_param(m.id | 0, Number(m.value));
+        x.sideband_set_param(m.id | 0, Number(m.value));
         break;
       case 'on':
-        x.opsix_note_on(m.note | 0, m.velocity | 0);
+        x.sideband_note_on(m.note | 0, m.velocity | 0);
         break;
       case 'off':
-        x.opsix_note_off(m.note | 0);
+        x.sideband_note_off(m.note | 0);
         break;
       case 'allOff':
-        x.opsix_all_notes_off();
+        x.sideband_all_notes_off();
         break;
       case 'panic':
-        x.opsix_panic();
+        x.sideband_panic();
         break;
       case 'volume':
-        x.opsix_set_volume(Number(m.gain));
+        x.sideband_set_volume(Number(m.gain));
         break;
       default:
         break;
@@ -73,8 +73,8 @@ class OpSixProcessor extends AudioWorkletProcessor {
     let written = 0;
     while (written < n) {
       if (this.pos >= BLOCK) {
-        this.x.opsix_render();
-        const g = this.x.opsix_gain_reduction();
+        this.x.sideband_render();
+        const g = this.x.sideband_gain_reduction();
         if (g < this.minGain) this.minGain = g;
         this.pos = 0;
         this.blocks++;
@@ -90,9 +90,9 @@ class OpSixProcessor extends AudioWorkletProcessor {
       this.blocks = 0;
       this.port.postMessage({
         type: 'meter',
-        peak: this.x.opsix_take_peak(),
+        peak: this.x.sideband_take_peak(),
         gain: this.minGain,
-        voices: this.x.opsix_active_voices(),
+        voices: this.x.sideband_active_voices(),
       });
       this.minGain = 1;
     }
@@ -100,4 +100,4 @@ class OpSixProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor('op-six', OpSixProcessor);
+registerProcessor('sideband', SidebandProcessor);

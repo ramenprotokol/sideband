@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>op-six · six-operator FM synthesizer</title>
+  <title>sideband · six-operator FM synthesizer</title>
   <meta name="description" content="A six-operator FM synth, written in C, running in your browser's audio thread.">
   <meta name="color-scheme" content="dark light">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -25,11 +25,11 @@
       <span>TONE GENERATOR</span>
     </div>
     <div class="sheet-title">
-      <h1>op-six</h1>
+      <h1>sideband</h1>
       <p class="lede">A six-operator FM synth, written in C, running in your browser&rsquo;s audio thread.</p>
     </div>
     <dl class="title-block" aria-label="Drawing title block">
-      <div><dt>MODEL</dt><dd>OP-SIX</dd></div>
+      <div><dt>MODEL</dt><dd>SIDEBAND</dd></div>
       <div><dt>OPERATORS</dt><dd>6</dd></div>
       <div><dt>ALGORITHMS</dt><dd>8</dd></div>
       <div><dt>VOICES</dt><dd>8</dd></div>
@@ -115,7 +115,7 @@
       <div class="notes-grid">
         <div>
           <h3 class="sub">WHY C</h3>
-          <p>C is the native language of synth firmware and DSP. The engine in <code>src/opsix.c</code> is freestanding C11: no libc, no libm, no heap. Every buffer is static, so the per-sample loop never allocates and always does the same bounded work. Sine comes from a 4096-point table built at start-up from a Taylor series; <code>exp2</code> is a short polynomial. <code>zig cc</code> compiles it to WebAssembly, which runs inside an <em>AudioWorklet</em>, the browser&rsquo;s real-time audio thread, 128 samples at a time. The page itself only draws and sends messages.</p>
+          <p>C is the native language of synth firmware and DSP. The engine in <code>src/sideband.c</code> is freestanding C11: no libc, no libm, no heap. Every buffer is static, so the per-sample loop never allocates and always does the same bounded work. Sine comes from a 4096-point table built at start-up from a Taylor series; <code>exp2</code> is a short polynomial. <code>zig cc</code> compiles it to WebAssembly, which runs inside an <em>AudioWorklet</em>, the browser&rsquo;s real-time audio thread, 128 samples at a time. The page itself only draws and sends messages.</p>
           <p>The same C file also compiles natively for the unit tests, and both builds give bit-identical samples for the same patch and notes.</p>
         </div>
         <div>
@@ -136,7 +136,7 @@
             <li>Eight voices. A ninth note takes over the oldest voice, released notes first.</li>
           </ul>
           <h3 class="sub">COLOPHON</h3>
-          <p>op-six is made in the tradition of 1980s six-operator FM synths and is not affiliated with any manufacturer. Set in IBM Plex, served by Google Fonts. See <a href="THIRD-PARTY-NOTICES.txt">third-party notices</a>. Built by Ramen Protocol with AI assistance (Claude). MIT licensed.</p>
+          <p>sideband is made in the tradition of 1980s six-operator FM synths and is not affiliated with any manufacturer. Set in IBM Plex, served by Google Fonts. See <a href="THIRD-PARTY-NOTICES.txt">third-party notices</a>. Built by Ramen Protocol with AI assistance (Claude). MIT licensed.</p>
         </div>
       </div>
     </section>
@@ -158,6 +158,6 @@
     <div class="keys" id="keys" role="group" aria-label="On-screen keyboard, two octaves. The computer keyboard plays the same notes."></div>
   </div>
 
-  <noscript><p class="noscript">op-six needs JavaScript and WebAssembly to make sound.</p></noscript>
+  <noscript><p class="noscript">sideband needs JavaScript and WebAssembly to make sound.</p></noscript>
 </body>
 </html>

@@ -1,7 +1,7 @@
 // The patch model, shared by the page and the Node tests.
 //
 // A patch is 80 small integers (2 global + 6 operators x 13). The layout and
-// the limits mirror src/opsix.c exactly; tests/render.test.mjs loads the real
+// the limits mirror src/sideband.c exactly; tests/render.test.mjs loads the real
 // WASM and checks every min/max/default against this file.
 //
 // Share links carry the patch in the URL fragment:  #p=1.<107 chars>&n=<name>
@@ -126,10 +126,10 @@ export class PatchLinkError extends Error {}
 export function decodePatch(text) {
   if (typeof text !== 'string') throw new PatchLinkError('The patch in this link is missing.');
   const m = /^(\d{1,3})\.([A-Za-z0-9_-]*)$/.exec(text);
-  if (!m) throw new PatchLinkError('The patch in this link is not in a format op-six knows.');
+  if (!m) throw new PatchLinkError('The patch in this link is not in a format sideband knows.');
   const version = Number(m[1]);
   if (version !== FORMAT_VERSION) {
-    throw new PatchLinkError(`This link uses patch format ${version}; this op-six reads format ${FORMAT_VERSION}.`);
+    throw new PatchLinkError(`This link uses patch format ${version}; this sideband reads format ${FORMAT_VERSION}.`);
   }
   if (m[2].length !== ENCODED_LENGTH) {
     throw new PatchLinkError(`The patch in this link is ${m[2].length} characters long; it should be ${ENCODED_LENGTH}.`);
@@ -159,7 +159,7 @@ export function patchToHash(values, name) {
 export function patchFromHash(hash) {
   if (typeof hash !== 'string' || hash.length <= 1) return { status: 'none' };
   if (hash.length > MAX_HASH_LENGTH) {
-    return { status: 'error', message: `This link is ${hash.length} characters long, which is too long to be an op-six patch (the limit is ${MAX_HASH_LENGTH}).` };
+    return { status: 'error', message: `This link is ${hash.length} characters long, which is too long to be a sideband patch (the limit is ${MAX_HASH_LENGTH}).` };
   }
   const fields = {};
   for (const part of hash.replace(/^#/, '').split('&').slice(0, 4)) {

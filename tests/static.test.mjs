@@ -19,7 +19,7 @@ function walk(dir, skip = new Set()) {
 }
 
 test('dist/ holds the page, the engine and the worklet', () => {
-  for (const f of ['index.html', 'styles.css', 'opsix.wasm', 'favicon.svg', '_headers', 'js/app.js', 'js/worklet.js', 'js/patch.js']) {
+  for (const f of ['index.html', 'styles.css', 'sideband.wasm', 'favicon.svg', '_headers', 'js/app.js', 'js/worklet.js', 'js/patch.js']) {
     assert.ok(existsSync(join(dist, f)), `missing dist/${f}`);
   }
   const files = walk(dist);

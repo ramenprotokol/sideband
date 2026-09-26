@@ -30,7 +30,7 @@ export function browserPlan(chromePath, env = process.env) {
 }
 
 export async function launchChrome(chromePath) {
-  const profile = mkdtempSync(join(tmpdir(), 'op-six-chrome-'));
+  const profile = mkdtempSync(join(tmpdir(), 'sideband-chrome-'));
   const proc = spawn(chromePath, [
     '--headless=new',
     '--remote-debugging-port=0',

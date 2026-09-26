@@ -7,10 +7,10 @@ export const dist = join(root, 'dist');
 
 // A fresh instance of the built engine (npm test builds dist/ first).
 export function loadEngine() {
-  const bytes = readFileSync(join(dist, 'opsix.wasm'));
+  const bytes = readFileSync(join(dist, 'sideband.wasm'));
   const x = new WebAssembly.Instance(new WebAssembly.Module(bytes), {}).exports;
-  const block = () => new Float32Array(x.memory.buffer, x.opsix_render(), 128);
-  const monitor = () => new Float32Array(x.memory.buffer, x.opsix_monitor(), 128);
+  const block = () => new Float32Array(x.memory.buffer, x.sideband_render(), 128);
+  const monitor = () => new Float32Array(x.memory.buffer, x.sideband_monitor(), 128);
   // Render n samples (rounded up to whole blocks) of output and monitor.
   const render = (n) => {
     const blocks = Math.ceil(n / 128);
@@ -22,7 +22,7 @@ export function loadEngine() {
     }
     return { out, mon };
   };
-  const setPatch = (values) => values.forEach((v, id) => x.opsix_set_param(id, v));
+  const setPatch = (values) => values.forEach((v, id) => x.sideband_set_param(id, v));
   return { x, render, setPatch };
 }
 

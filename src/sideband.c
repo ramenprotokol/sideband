@@ -1,12 +1,12 @@
 /*
- * op-six engine. See opsix.h for the signal flow and parameter layout.
+ * sideband engine. See sideband.h for the signal flow and parameter layout.
  *
  * Why this is C: synth firmware and DSP libraries are written in C because
  * the inner loop has to be deterministic and allocation-free. Everything here
- * lives in static storage; opsix_render() touches no heap, takes no locks and
+ * lives in static storage; sideband_render() touches no heap, takes no locks and
  * always does a bounded amount of work (8 voices x 6 operators x 128 samples).
  */
-#include "opsix.h"
+#include "sideband.h"
 #include "dspmath.h"
 
 /* ------------------------------------------------------------------------ */
@@ -14,12 +14,12 @@
 
 typedef struct { int8_t min, max, def; } Spec;
 
-static const Spec GLOBAL_SPEC[OPSIX_GLOBALS] = {
-  {0, OPSIX_ALGOS - 1, 0}, /* algorithm */
+static const Spec GLOBAL_SPEC[SIDEBAND_GLOBALS] = {
+  {0, SIDEBAND_ALGOS - 1, 0}, /* algorithm */
   {0, 7, 0},               /* feedback on the algorithm's feedback operator */
 };
 
-static const Spec OP_SPEC[OPSIX_OP_PARAMS] = {
+static const Spec OP_SPEC[SIDEBAND_OP_PARAMS] = {
   {0, 1, 0},     /* mode */
   {0, 31, 1},    /* coarse */
   {0, 99, 0},    /* fine */
@@ -29,20 +29,20 @@ static const Spec OP_SPEC[OPSIX_OP_PARAMS] = {
   {0, 99, 99}, {0, 99, 99}, {0, 99, 99}, {0, 99, 0},  /* L1..L4 */
 };
 
-static int valid_id(int id) { return id >= 0 && id < OPSIX_PARAMS; }
+static int valid_id(int id) { return id >= 0 && id < SIDEBAND_PARAMS; }
 
 static Spec param_spec(int id) {
-  if (id < OPSIX_GLOBALS) return GLOBAL_SPEC[id];
-  int op = (id - OPSIX_GLOBALS) / OPSIX_OP_PARAMS;
-  int off = (id - OPSIX_GLOBALS) % OPSIX_OP_PARAMS;
+  if (id < SIDEBAND_GLOBALS) return GLOBAL_SPEC[id];
+  int op = (id - SIDEBAND_GLOBALS) / SIDEBAND_OP_PARAMS;
+  int off = (id - SIDEBAND_GLOBALS) % SIDEBAND_OP_PARAMS;
   Spec s = OP_SPEC[off];
-  if (off == OPSIX_OP_LEVEL && op == 0) s.def = 99; /* the init voice is one sine */
+  if (off == SIDEBAND_OP_LEVEL && op == 0) s.def = 99; /* the init voice is one sine */
   return s;
 }
 
-static int8_t g_param[OPSIX_PARAMS];
+static int8_t g_param[SIDEBAND_PARAMS];
 
-#define OPP(op, off) (g_param[OPSIX_GLOBALS + (op) * OPSIX_OP_PARAMS + (off)])
+#define OPP(op, off) (g_param[SIDEBAND_GLOBALS + (op) * SIDEBAND_OP_PARAMS + (off)])
 
 /* ------------------------------------------------------------------------ */
 /* Algorithms: which operator modulates which. Operators are numbered so that */
@@ -53,12 +53,12 @@ static int8_t g_param[OPSIX_PARAMS];
 #define B(n) (1u << ((n) - 1)) /* bit for OPn */
 
 typedef struct {
-  uint8_t mod[OPSIX_OPS]; /* mod[k]: operators feeding OP(k+1) */
+  uint8_t mod[SIDEBAND_OPS]; /* mod[k]: operators feeding OP(k+1) */
   uint8_t carriers;       /* operators summed to the output */
   uint8_t fb_op;          /* index (0..5) of the operator with self-feedback */
 } Algo;
 
-static const Algo ALGOS[OPSIX_ALGOS] = {
+static const Algo ALGOS[SIDEBAND_ALGOS] = {
   /* 1 PAIRS       2>1  4>3  6>5                  */ {{B(2), 0, B(4), 0, B(6), 0}, B(1) | B(3) | B(5), 5},
   /* 2 TWIN STACKS 3>2>1  6>5>4                   */ {{B(2), B(3), 0, B(5), B(6), 0}, B(1) | B(4), 5},
   /* 3 PAIR+FOUR   2>1  6>5>4>3                   */ {{B(2), 0, B(4), B(5), B(6), 0}, B(1) | B(3), 5},
@@ -92,7 +92,7 @@ static const Algo ALGOS[OPSIX_ALGOS] = {
 
 /* 1/sqrt(carriers): switching algorithms keeps roughly the same loudness
  * without one carrier becoming inaudible next to six. */
-static const float CARRIER_NORM[OPSIX_OPS + 1] = {
+static const float CARRIER_NORM[SIDEBAND_OPS + 1] = {
   0.0f, 1.0f, 0.70710678f, 0.57735027f, 0.5f, 0.44721360f, 0.40824829f,
 };
 
@@ -105,7 +105,7 @@ typedef struct {
 } OpState;
 
 typedef struct {
-  OpState op[OPSIX_OPS];
+  OpState op[SIDEBAND_OPS];
   float fb1, fb2;     /* last two outputs of the feedback operator */
   float vel_gain;
   float fade;         /* 1 while playing; ramps to 0 when ending */
@@ -118,11 +118,11 @@ typedef struct {
 
 static float g_sr = 48000.0f;
 static double g_rate_step[100];    /* envelope units per sample for each rate */
-static Voice g_voice[OPSIX_VOICES];
+static Voice g_voice[SIDEBAND_VOICES];
 static uint32_t g_age;
-static float g_out[OPSIX_BLOCK];
-static float g_mon[OPSIX_BLOCK];
-static float g_mix[OPSIX_BLOCK];
+static float g_out[SIDEBAND_BLOCK];
+static float g_mon[SIDEBAND_BLOCK];
+static float g_mix[SIDEBAND_BLOCK];
 
 static float g_volume, g_volume_target, g_volume_coef;
 static float g_dc_x1, g_dc_y1, g_dc_r;
@@ -147,16 +147,16 @@ static float note_hz(int note) {
 /* The frequency of operator `op` for a key at `key_hz`. */
 static float op_hz(int op, float key_hz) {
   float hz;
-  int coarse = OPP(op, OPSIX_OP_COARSE);
-  float fine = (float)OPP(op, OPSIX_OP_FINE) * 0.01f;
-  if (OPP(op, OPSIX_OP_MODE) == 1) {
+  int coarse = OPP(op, SIDEBAND_OP_COARSE);
+  float fine = (float)OPP(op, SIDEBAND_OP_FINE) * 0.01f;
+  if (OPP(op, SIDEBAND_OP_MODE) == 1) {
     /* Fixed: 10^((coarse mod 4) + fine/100) Hz, i.e. 1 Hz to about 9.8 kHz. */
     hz = exp2_approx(3.3219281f * ((float)(coarse & 3) + fine));
   } else {
     float ratio = coarse == 0 ? 0.5f : (float)coarse;
     hz = key_hz * ratio * (1.0f + fine);
   }
-  return hz * exp2_approx((float)OPP(op, OPSIX_OP_DETUNE) * (1.0f / 1200.0f));
+  return hz * exp2_approx((float)OPP(op, SIDEBAND_OP_DETUNE) * (1.0f / 1200.0f));
 }
 
 static uint32_t hz_to_inc(float hz) {
@@ -167,7 +167,7 @@ static uint32_t hz_to_inc(float hz) {
 }
 
 static float feedback_turns(void) {
-  int fb = g_param[OPSIX_P_FEEDBACK];
+  int fb = g_param[SIDEBAND_P_FEEDBACK];
   if (fb <= 0) return 0.0f;
   float rad = FB_MAX_RAD * exp2_approx((float)(fb - 7));
   return rad / (2.0f * (float)DSP_PI);
@@ -180,14 +180,14 @@ static inline void env_tick(OpState *o, int op) {
   if (o->stage == STAGE_DONE || o->stage == 2) {
     /* Sustain and done both hold at their target; sustain may still be
      * gliding towards L3 if L3 was edited while the key is down. */
-    double target = (double)OPP(op, o->stage == 2 ? OPSIX_OP_L3 : OPSIX_OP_L4);
-    double step = g_rate_step[OPP(op, o->stage == 2 ? OPSIX_OP_R3 : OPSIX_OP_R4)];
+    double target = (double)OPP(op, o->stage == 2 ? SIDEBAND_OP_L3 : SIDEBAND_OP_L4);
+    double step = g_rate_step[OPP(op, o->stage == 2 ? SIDEBAND_OP_R3 : SIDEBAND_OP_R4)];
     if (o->env < target) { o->env += step * RISE_K * (RISE_TOP - o->env); if (o->env > target) o->env = target; }
     else if (o->env > target) { o->env -= step; if (o->env < target) o->env = target; }
     return;
   }
-  double target = (double)OPP(op, OPSIX_OP_L1 + o->stage);
-  double step = g_rate_step[OPP(op, OPSIX_OP_R1 + o->stage)];
+  double target = (double)OPP(op, SIDEBAND_OP_L1 + o->stage);
+  double step = g_rate_step[OPP(op, SIDEBAND_OP_R1 + o->stage)];
   if (o->env < target) {
     o->env += step * RISE_K * (RISE_TOP - o->env);
     if (o->env >= target) { o->env = target; o->stage++; }
@@ -203,7 +203,7 @@ static inline void env_tick(OpState *o, int op) {
 /* Voices                                                                    */
 
 static void voice_reset(Voice *v) {
-  for (int k = 0; k < OPSIX_OPS; k++) {
+  for (int k = 0; k < SIDEBAND_OPS; k++) {
     v->op[k].phase = 0u;
     v->op[k].env = 0.0;
     v->op[k].stage = STAGE_DONE;
@@ -221,16 +221,16 @@ static void voice_reset(Voice *v) {
 
 static Voice *voice_pick(int note) {
   Voice *best = 0;
-  for (int i = 0; i < OPSIX_VOICES; i++)
+  for (int i = 0; i < SIDEBAND_VOICES; i++)
     if (g_voice[i].active && g_voice[i].note == note) return &g_voice[i];
-  for (int i = 0; i < OPSIX_VOICES; i++)
+  for (int i = 0; i < SIDEBAND_VOICES; i++)
     if (!g_voice[i].active) return &g_voice[i];
   /* All busy: steal the oldest released voice, else the oldest held one. */
-  for (int i = 0; i < OPSIX_VOICES; i++)
+  for (int i = 0; i < SIDEBAND_VOICES; i++)
     if (!g_voice[i].gate && (!best || g_voice[i].age < best->age)) best = &g_voice[i];
   if (best) return best;
   best = &g_voice[0];
-  for (int i = 1; i < OPSIX_VOICES; i++)
+  for (int i = 1; i < SIDEBAND_VOICES; i++)
     if (g_voice[i].age < best->age) best = &g_voice[i];
   return best;
 }
@@ -239,8 +239,8 @@ static float velocity_gain(int velocity) {
   return 0.3f + 0.7f * (float)velocity * (1.0f / 127.0f);
 }
 
-void opsix_note_on(int note, int velocity) {
-  if (velocity <= 0) { opsix_note_off(note); return; }
+void sideband_note_on(int note, int velocity) {
+  if (velocity <= 0) { sideband_note_off(note); return; }
   if (note < 0) note = 0;
   if (note > 127) note = 127;
   if (velocity > 127) velocity = 127;
@@ -253,70 +253,70 @@ void opsix_note_on(int note, int velocity) {
   v->fade = 1.0f;
   v->age = ++g_age;
   v->vel_gain = velocity_gain(velocity);
-  for (int k = 0; k < OPSIX_OPS; k++) {
+  for (int k = 0; k < SIDEBAND_OPS; k++) {
     OpState *o = &v->op[k];
     o->stage = 0;
     if (!was_active) {
       /* Key sync: a fresh voice starts every operator at phase 0 and its
        * envelope at L4, so the same notes always give the same samples. */
       o->phase = 0u;
-      o->env = (double)OPP(k, OPSIX_OP_L4);
-      o->gain = level_amp((float)OPP(k, OPSIX_OP_LEVEL));
+      o->env = (double)OPP(k, SIDEBAND_OP_L4);
+      o->gain = level_amp((float)OPP(k, SIDEBAND_OP_LEVEL));
     }
     /* A retriggered or stolen voice keeps its phase and level to avoid a click. */
   }
   if (!was_active) v->fb1 = v->fb2 = 0.0f;
 }
 
-void opsix_note_off(int note) {
-  for (int i = 0; i < OPSIX_VOICES; i++) {
+void sideband_note_off(int note) {
+  for (int i = 0; i < SIDEBAND_VOICES; i++) {
     Voice *v = &g_voice[i];
     if (v->active && v->gate && v->note == note) {
       v->gate = 0;
-      for (int k = 0; k < OPSIX_OPS; k++) v->op[k].stage = 3;
+      for (int k = 0; k < SIDEBAND_OPS; k++) v->op[k].stage = 3;
     }
   }
 }
 
-void opsix_all_notes_off(void) {
-  for (int i = 0; i < OPSIX_VOICES; i++)
-    if (g_voice[i].active && g_voice[i].gate) opsix_note_off(g_voice[i].note);
+void sideband_all_notes_off(void) {
+  for (int i = 0; i < SIDEBAND_VOICES; i++)
+    if (g_voice[i].active && g_voice[i].gate) sideband_note_off(g_voice[i].note);
 }
 
-void opsix_panic(void) {
-  for (int i = 0; i < OPSIX_VOICES; i++) voice_reset(&g_voice[i]);
+void sideband_panic(void) {
+  for (int i = 0; i < SIDEBAND_VOICES; i++) voice_reset(&g_voice[i]);
   g_dc_x1 = g_dc_y1 = 0.0f;
   g_lim_env = 0.0f;
   g_lim_gain = 1.0f;
 }
 
-int opsix_active_voices(void) {
+int sideband_active_voices(void) {
   int n = 0;
-  for (int i = 0; i < OPSIX_VOICES; i++) n += g_voice[i].active;
+  for (int i = 0; i < SIDEBAND_VOICES; i++) n += g_voice[i].active;
   return n;
 }
 
 static void render_voice(Voice *v, float *mix) {
-  const Algo *al = &ALGOS[g_param[OPSIX_P_ALGO]];
+  const Algo *al = &ALGOS[g_param[SIDEBAND_P_ALGO]];
   const float fb_amt = feedback_turns() * 0.5f; /* averages the last two samples */
   const int fb_op = al->fb_op;
   const float key_hz = note_hz(v->note);
   int ncar = 0;
-  for (int k = 0; k < OPSIX_OPS; k++) ncar += (al->carriers >> k) & 1;
+  for (int k = 0; k < SIDEBAND_OPS; k++) ncar += (al->carriers >> k) & 1;
   const float out_gain = v->vel_gain * CARRIER_NORM[ncar];
 
-  uint32_t inc[OPSIX_OPS];
-  float gain_step[OPSIX_OPS], gain_target[OPSIX_OPS];
-  for (int k = 0; k < OPSIX_OPS; k++) {
+  uint32_t inc[SIDEBAND_OPS];
+  float gain_step[SIDEBAND_OPS], gain_target[SIDEBAND_OPS];
+  for (int k = 0; k < SIDEBAND_OPS; k++) {
     inc[k] = hz_to_inc(op_hz(k, key_hz));
-    gain_target[k] = level_amp((float)OPP(k, OPSIX_OP_LEVEL));
-    gain_step[k] = (gain_target[k] - v->op[k].gain) * (1.0f / (float)OPSIX_BLOCK);
+    gain_target[k] = level_amp((float)OPP(k, SIDEBAND_OP_LEVEL));
+    gain_step[k] = (gain_target[k] - v->op[k].gain) * (1.0f / (float)SIDEBAND_BLOCK);
   }
 
-  for (int s = 0; s < OPSIX_BLOCK; s++) {
-    float out[OPSIX_OPS];
+  for (int s = 0; s < SIDEBAND_BLOCK; s++) {
+    float out[SIDEBAND_OPS];
     float sum = 0.0f;
-    for (int k = OPSIX_OPS - 1; k >= 0; k--) {
+    for (int k = SIDEBAND_OPS - 1; k >= 0; k--) {
       OpState *o = &v->op[k];
       env_tick(o, k);
       o->gain += gain_step[k];
@@ -324,7 +324,7 @@ static void render_voice(Voice *v, float *mix) {
       float y = 0.0f;
       if (amp > 0.0f) {
         float mod = 0.0f;
-        for (int j = k + 1; j < OPSIX_OPS; j++)
+        for (int j = k + 1; j < SIDEBAND_OPS; j++)
           if (al->mod[k] & (1u << j)) mod += out[j];
         float turns = mod * MOD_TURNS;
         if (k == fb_op) turns += (v->fb1 + v->fb2) * fb_amt;
@@ -342,14 +342,14 @@ static void render_voice(Voice *v, float *mix) {
     }
     mix[s] += sum * out_gain * v->fade;
   }
-  for (int k = 0; k < OPSIX_OPS; k++) v->op[k].gain = gain_target[k];
+  for (int k = 0; k < SIDEBAND_OPS; k++) v->op[k].gain = gain_target[k];
 
   /* A released voice ends once every carrier envelope has finished. If a
    * carrier settles above silence (L4 > 0) it fades out, so no patch can
    * leave a note droning after the key is let go. */
   if (!v->gate) {
     int finished = 1, silent = 1;
-    for (int k = 0; k < OPSIX_OPS; k++) {
+    for (int k = 0; k < SIDEBAND_OPS; k++) {
       if (!(al->carriers & (1u << k))) continue;
       const OpState *o = &v->op[k];
       float a = level_amp((float)o->env) * o->gain;
@@ -381,32 +381,32 @@ static inline float master_sample(float x, float *mon) {
   float held = g_lim_env * g_lim_rel;
   g_lim_env = a > held ? a : held;
   if (g_lim_env < 1e-20f) g_lim_env = 0.0f;
-  g_lim_gain = g_lim_env > OPSIX_LIMIT_THRESHOLD ? OPSIX_LIMIT_THRESHOLD / g_lim_env : 1.0f;
+  g_lim_gain = g_lim_env > SIDEBAND_LIMIT_THRESHOLD ? SIDEBAND_LIMIT_THRESHOLD / g_lim_env : 1.0f;
   y *= g_lim_gain;
   *mon = y;
   /* Volume (smoothed), then a hard ceiling as the last line of defence. */
   g_volume += (g_volume_target - g_volume) * g_volume_coef;
   float out = y * g_volume;
-  if (out > OPSIX_CEILING) out = OPSIX_CEILING;
-  if (out < -OPSIX_CEILING) out = -OPSIX_CEILING;
+  if (out > SIDEBAND_CEILING) out = SIDEBAND_CEILING;
+  if (out < -SIDEBAND_CEILING) out = -SIDEBAND_CEILING;
   return out;
 }
 
-float *opsix_render(void) {
-  for (int s = 0; s < OPSIX_BLOCK; s++) g_mix[s] = 0.0f;
-  for (int i = 0; i < OPSIX_VOICES; i++)
+float *sideband_render(void) {
+  for (int s = 0; s < SIDEBAND_BLOCK; s++) g_mix[s] = 0.0f;
+  for (int i = 0; i < SIDEBAND_VOICES; i++)
     if (g_voice[i].active) render_voice(&g_voice[i], g_mix);
 
   /* Should never happen with clamped parameters (the fuzz tests check), but
    * if a non-finite value ever appears, silence every voice at once. */
   int bad = 0;
-  for (int s = 0; s < OPSIX_BLOCK; s++) if (!is_finite(g_mix[s])) bad = 1;
+  for (int s = 0; s < SIDEBAND_BLOCK; s++) if (!is_finite(g_mix[s])) bad = 1;
   if (bad) {
-    opsix_panic();
-    for (int s = 0; s < OPSIX_BLOCK; s++) g_mix[s] = 0.0f;
+    sideband_panic();
+    for (int s = 0; s < SIDEBAND_BLOCK; s++) g_mix[s] = 0.0f;
   }
 
-  for (int s = 0; s < OPSIX_BLOCK; s++) {
+  for (int s = 0; s < SIDEBAND_BLOCK; s++) {
     float out = master_sample(g_mix[s] * MIX_GAIN, &g_mon[s]);
     g_out[s] = out;
     float a = absf(out);
@@ -415,17 +415,17 @@ float *opsix_render(void) {
   return g_out;
 }
 
-float *opsix_monitor(void) { return g_mon; }
+float *sideband_monitor(void) { return g_mon; }
 
-float opsix_take_peak(void) {
+float sideband_take_peak(void) {
   float p = g_peak;
   g_peak = 0.0f;
   return p;
 }
 
-float opsix_gain_reduction(void) { return g_lim_gain; }
+float sideband_gain_reduction(void) { return g_lim_gain; }
 
-float opsix_set_volume(float gain) {
+float sideband_set_volume(float gain) {
   if (!is_finite(gain)) return g_volume_target;
   if (gain < 0.0f) gain = 0.0f;
   if (gain > 1.0f) gain = 1.0f;
@@ -436,7 +436,7 @@ float opsix_set_volume(float gain) {
 /* ------------------------------------------------------------------------ */
 /* Parameters API                                                            */
 
-float opsix_set_param(int id, float value) {
+float sideband_set_param(int id, float value) {
   if (!valid_id(id)) return 0.0f;
   if (!is_finite(value)) return (float)g_param[id];
   Spec s = param_spec(id);
@@ -449,29 +449,29 @@ float opsix_set_param(int id, float value) {
   return (float)v;
 }
 
-float opsix_get_param(int id) { return valid_id(id) ? (float)g_param[id] : 0.0f; }
-float opsix_param_min(int id) { return valid_id(id) ? (float)param_spec(id).min : 0.0f; }
-float opsix_param_max(int id) { return valid_id(id) ? (float)param_spec(id).max : 0.0f; }
-float opsix_param_default(int id) { return valid_id(id) ? (float)param_spec(id).def : 0.0f; }
+float sideband_get_param(int id) { return valid_id(id) ? (float)g_param[id] : 0.0f; }
+float sideband_param_min(int id) { return valid_id(id) ? (float)param_spec(id).min : 0.0f; }
+float sideband_param_max(int id) { return valid_id(id) ? (float)param_spec(id).max : 0.0f; }
+float sideband_param_default(int id) { return valid_id(id) ? (float)param_spec(id).def : 0.0f; }
 
-int opsix_algo_mod_mask(int algo, int op) {
-  if (algo < 0 || algo >= OPSIX_ALGOS || op < 0 || op >= OPSIX_OPS) return 0;
+int sideband_algo_mod_mask(int algo, int op) {
+  if (algo < 0 || algo >= SIDEBAND_ALGOS || op < 0 || op >= SIDEBAND_OPS) return 0;
   return ALGOS[algo].mod[op];
 }
 
-int opsix_algo_carrier_mask(int algo) {
-  return (algo >= 0 && algo < OPSIX_ALGOS) ? ALGOS[algo].carriers : 0;
+int sideband_algo_carrier_mask(int algo) {
+  return (algo >= 0 && algo < SIDEBAND_ALGOS) ? ALGOS[algo].carriers : 0;
 }
 
-int opsix_algo_feedback_op(int algo) {
-  return (algo >= 0 && algo < OPSIX_ALGOS) ? ALGOS[algo].fb_op : -1;
+int sideband_algo_feedback_op(int algo) {
+  return (algo >= 0 && algo < SIDEBAND_ALGOS) ? ALGOS[algo].fb_op : -1;
 }
 
-float opsix_sample_rate(void) { return g_sr; }
+float sideband_sample_rate(void) { return g_sr; }
 
 /* ------------------------------------------------------------------------ */
 
-void opsix_init(float sample_rate) {
+void sideband_init(float sample_rate) {
   if (!is_finite(sample_rate)) sample_rate = 48000.0f;
   if (sample_rate < 8000.0f) sample_rate = 8000.0f;
   if (sample_rate > 192000.0f) sample_rate = 192000.0f;
@@ -487,12 +487,12 @@ void opsix_init(float sample_rate) {
     g_rate_step[r] = 99.0 / (t * (double)g_sr);
   }
 
-  for (int id = 0; id < OPSIX_PARAMS; id++) g_param[id] = param_spec(id).def;
-  for (int i = 0; i < OPSIX_VOICES; i++) voice_reset(&g_voice[i]);
+  for (int id = 0; id < SIDEBAND_PARAMS; id++) g_param[id] = param_spec(id).def;
+  for (int i = 0; i < SIDEBAND_VOICES; i++) voice_reset(&g_voice[i]);
   g_age = 0u;
 
   g_volume = 0.0f; /* fades in from silence */
-  g_volume_target = OPSIX_DEFAULT_VOLUME;
+  g_volume_target = SIDEBAND_DEFAULT_VOLUME;
   g_volume_coef = 1.0f / (VOLUME_SMOOTH_S * g_sr + 1.0f);
   g_dc_r = 1.0f - (2.0f * (float)DSP_PI * 4.0f / g_sr); /* ~4 Hz corner */
   g_dc_x1 = g_dc_y1 = 0.0f;
@@ -502,5 +502,5 @@ void opsix_init(float sample_rate) {
   g_lim_gain = 1.0f;
   g_peak = 0.0f;
   g_end_step = 1.0f / (END_FADE_S * g_sr);
-  for (int s = 0; s < OPSIX_BLOCK; s++) g_out[s] = g_mon[s] = g_mix[s] = 0.0f;
+  for (int s = 0; s < SIDEBAND_BLOCK; s++) g_out[s] = g_mon[s] = g_mix[s] = 0.0f;
 }

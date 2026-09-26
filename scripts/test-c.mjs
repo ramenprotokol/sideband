@@ -20,10 +20,10 @@ const variants = [
 
 let failed = false;
 for (const v of variants) {
-  const exe = join(out, `test_opsix_${v.name}`);
-  const compile = spawnSync('zig', [...common, ...v.flags, '-o', exe, join(root, 'tests', 'c', 'test_opsix.c'), '-lm'], { stdio: 'inherit' });
+  const exe = join(out, `test_sideband_${v.name}`);
+  const compile = spawnSync('zig', [...common, ...v.flags, '-o', exe, join(root, 'tests', 'c', 'test_sideband.c'), '-lm'], { stdio: 'inherit' });
   if (compile.error) {
-    console.error(`could not run zig: ${compile.error.message}. op-six needs Zig 0.16 on PATH.`);
+    console.error(`could not run zig: ${compile.error.message}. sideband needs Zig 0.16 on PATH.`);
     process.exit(1);
   }
   if (compile.status !== 0) process.exit(compile.status ?? 1);

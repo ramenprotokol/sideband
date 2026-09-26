@@ -24,7 +24,7 @@ export async function connectMidi({ onMessage, onStatus }) {
   } catch (e) {
     const denied = e && (e.name === 'SecurityError' || e.name === 'NotAllowedError');
     onStatus(denied
-      ? 'MIDI access was declined, so op-six will not listen to MIDI. The computer keyboard still plays.'
+      ? 'MIDI access was declined, so sideband will not listen to MIDI. The computer keyboard still plays.'
       : `MIDI could not start (${(e && e.message) || 'unknown error'}). The computer keyboard still plays.`);
     return null;
   }

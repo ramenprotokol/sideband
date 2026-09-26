@@ -13,7 +13,7 @@ const MINUS = '−';
 
 // ---- theme (per-viewer convenience; storage may be unavailable) -------------
 
-const THEME_KEY = 'op-six-theme';
+const THEME_KEY = 'sideband-theme';
 function storedTheme() {
   try { return localStorage.getItem(THEME_KEY); } catch { return null; }
 }
@@ -298,5 +298,5 @@ new ResizeObserver(([entry]) => {
 // ---- test hook (automation only) --------------------------------------------
 
 if (navigator.webdriver || new URLSearchParams(location.search).has('test')) {
-  window.__opsix = { state, engine, monitor, keyboard, presets: PRESETS };
+  window.__sideband = { state, engine, monitor, keyboard, presets: PRESETS };
 }

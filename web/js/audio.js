@@ -7,8 +7,8 @@ const READY_TIMEOUT_MS = 8000;
 let wasmBytes = null;
 function loadWasm() {
   if (!wasmBytes) {
-    wasmBytes = fetch(new URL('../opsix.wasm', import.meta.url)).then((r) => {
-      if (!r.ok) throw new Error(`the synth engine (opsix.wasm) failed to load: HTTP ${r.status}`);
+    wasmBytes = fetch(new URL('../sideband.wasm', import.meta.url)).then((r) => {
+      if (!r.ok) throw new Error(`the synth engine (sideband.wasm) failed to load: HTTP ${r.status}`);
       return r.arrayBuffer();
     });
     wasmBytes.catch(() => { wasmBytes = null; }); // allow a retry
@@ -58,9 +58,9 @@ export class AudioEngine {
     this.ctx = ctx;
     // Resume inside the gesture; some browsers only allow it there.
     const resumed = ctx.resume().catch(() => {});
-    if (!ctx.audioWorklet) throw new Error('this browser has no AudioWorklet, which op-six needs for its audio thread.');
+    if (!ctx.audioWorklet) throw new Error('this browser has no AudioWorklet, which sideband needs for its audio thread.');
     const [bytes] = await Promise.all([loadWasm(), ctx.audioWorklet.addModule(new URL('./worklet.js', import.meta.url))]);
-    const node = new AudioWorkletNode(ctx, 'op-six', {
+    const node = new AudioWorkletNode(ctx, 'sideband', {
       numberOfInputs: 0,
       numberOfOutputs: 2,
       outputChannelCount: [2, 1],

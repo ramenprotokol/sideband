@@ -1,5 +1,5 @@
 // The eight algorithms, as drawn in the manual. The routing mirrors the
-// ALGOS table in src/opsix.c; tests/render.test.mjs checks the two agree by
+// ALGOS table in src/sideband.c; tests/render.test.mjs checks the two agree by
 // reading the table out of the compiled WASM.
 //
 // pos: [column, row] per operator, row 0 = carriers on the output bus.
@@ -25,7 +25,7 @@ export const ALGORITHMS = [
 
 export const FEEDBACK_OP = 6;
 
-// Same bit layout as opsix_algo_mod_mask(): bit j set = OP(j+1) feeds OP(op+1).
+// Same bit layout as sideband_algo_mod_mask(): bit j set = OP(j+1) feeds OP(op+1).
 export function modMask(algo, op) {
   return ALGORITHMS[algo].edges.reduce((m, [from, to]) => (to === op + 1 ? m | (1 << (from - 1)) : m), 0);
 }

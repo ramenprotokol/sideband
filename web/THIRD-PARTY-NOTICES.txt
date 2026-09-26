@@ -1,15 +1,15 @@
-op-six: third-party notices
+sideband: third-party notices
 ===========================
 
 What ships in this site
 -----------------------
 Nothing in this site's files was written by a third party.
 
-- opsix.wasm is compiled from op-six's own C source (src/opsix.c) with
+- sideband.wasm is compiled from sideband's own C source (src/sideband.c) with
   `zig cc -target wasm32-freestanding -nostdlib`. No C library, maths
   library or compiler runtime is linked into it; the build fails if the
   module would need anything from outside.
-- The JavaScript, HTML, CSS and SVG files are op-six's own code
+- The JavaScript, HTML, CSS and SVG files are sideband's own code
   (MIT licence, see LICENSE in the source repository).
 
 What the page loads from elsewhere

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Builds dist/ from a clean clone. Needs Zig 0.16 (for `zig cc`) and Node 20+.
-//   1. compiles src/opsix.c to dist/opsix.wasm with zig cc (wasm32-freestanding,
+//   1. compiles src/sideband.c to dist/sideband.wasm with zig cc (wasm32-freestanding,
 //      -nostdlib: no libc and no compiler runtime are linked in)
 //   2. copies web/ into dist/
 //   3. writes dist/_headers (CSP, no-cache revalidation for unhashed files)
@@ -13,11 +13,11 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
 
 export const EXPORTS = [
-  'opsix_init', 'opsix_sample_rate',
-  'opsix_set_param', 'opsix_get_param', 'opsix_param_min', 'opsix_param_max', 'opsix_param_default',
-  'opsix_note_on', 'opsix_note_off', 'opsix_all_notes_off', 'opsix_panic', 'opsix_set_volume',
-  'opsix_render', 'opsix_monitor', 'opsix_take_peak', 'opsix_gain_reduction', 'opsix_active_voices',
-  'opsix_algo_mod_mask', 'opsix_algo_carrier_mask', 'opsix_algo_feedback_op',
+  'sideband_init', 'sideband_sample_rate',
+  'sideband_set_param', 'sideband_get_param', 'sideband_param_min', 'sideband_param_max', 'sideband_param_default',
+  'sideband_note_on', 'sideband_note_off', 'sideband_all_notes_off', 'sideband_panic', 'sideband_set_volume',
+  'sideband_render', 'sideband_monitor', 'sideband_take_peak', 'sideband_gain_reduction', 'sideband_active_voices',
+  'sideband_algo_mod_mask', 'sideband_algo_carrier_mask', 'sideband_algo_feedback_op',
 ];
 
 // Fixed 256 KiB of linear memory (4 pages): room for the static buffers and
@@ -37,7 +37,7 @@ function run(cmd, args) {
   const r = spawnSync(cmd, args, { cwd: root, stdio: 'inherit' });
   if (r.error) {
     console.error(`could not run ${cmd}: ${r.error.message}`);
-    if (cmd === 'zig') console.error('op-six needs Zig 0.16 on PATH (it uses `zig cc` to compile C to WebAssembly).');
+    if (cmd === 'zig') console.error('sideband needs Zig 0.16 on PATH (it uses `zig cc` to compile C to WebAssembly).');
     process.exit(1);
   }
   if (r.status !== 0) process.exit(r.status ?? 1);
@@ -60,7 +60,7 @@ const HEADERS = `/*
 export function build() {
   rmSync(dist, { recursive: true, force: true });
   mkdirSync(dist, { recursive: true });
-  run('zig', [...ZIG_ARGS, '-o', join(dist, 'opsix.wasm'), join(root, 'src', 'opsix.c')]);
+  run('zig', [...ZIG_ARGS, '-o', join(dist, 'sideband.wasm'), join(root, 'src', 'sideband.c')]);
   cpSync(join(root, 'web'), dist, { recursive: true });
   writeFileSync(join(dist, '_headers'), HEADERS);
 
@@ -71,11 +71,11 @@ export function build() {
     console.log(`${String(size).padStart(8)}  ${relative(dist, file)}`);
   }
   console.log(`${String(total).padStart(8)}  bytes in dist/`);
-  const wasm = readFileSync(join(dist, 'opsix.wasm'));
+  const wasm = readFileSync(join(dist, 'sideband.wasm'));
   const mod = new WebAssembly.Module(wasm);
   const imports = WebAssembly.Module.imports(mod);
   if (imports.length) {
-    console.error(`opsix.wasm must be self-contained but imports: ${JSON.stringify(imports)}`);
+    console.error(`sideband.wasm must be self-contained but imports: ${JSON.stringify(imports)}`);
     process.exit(1);
   }
 }

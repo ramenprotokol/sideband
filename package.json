@@ -1,5 +1,5 @@
 {
-  "name": "op-six",
+  "name": "sideband",
   "version": "0.1.0",
   "private": true,
   "description": "A six-operator FM synth, written in C, running in your browser's audio thread.",

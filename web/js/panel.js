@@ -60,7 +60,7 @@ function egPath(values, op, w, h) {
   const g = (k) => values[paramId(op, k)];
   const L = [g('l4'), g('l1'), g('l2'), g('l3'), g('l4')];
   const R = [g('r1'), g('r2'), g('r3'), g('r4')];
-  // Falls are straight in level (dB); rises ease in (see RISE_TOP in opsix.c).
+  // Falls are straight in level (dB); rises ease in (see RISE_TOP in sideband.c).
   const seconds = R.map((r, i) => (L[i + 1] > L[i]
     ? (Math.log((119 - L[i]) / (119 - L[i + 1])) / Math.log(119 / 20)) * sweepSeconds(r)
     : ((L[i] - L[i + 1]) / 99) * sweepSeconds(r)));

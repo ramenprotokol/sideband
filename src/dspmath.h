@@ -3,8 +3,8 @@
  * No libm. Everything here is plain IEEE float/double arithmetic, so it gives
  * the same bits on every WebAssembly engine.
  */
-#ifndef OPSIX_DSPMATH_H
-#define OPSIX_DSPMATH_H
+#ifndef SIDEBAND_DSPMATH_H
+#define SIDEBAND_DSPMATH_H
 
 #include <stdint.h>
 

@@ -31,9 +31,9 @@ try {
   for (const [name, width, height, mobile] of [['desktop', 1280, 800, false], ['phone', 400, 860, true]]) {
     const page = await chrome.openPage({ width, height, mobile, scale: 1, scheme: theme });
     await page.navigate(`${base}?test=1`);
-    await page.waitFor('window.__opsix && document.fonts.status === "loaded"', 20000);
+    await page.waitFor('window.__sideband && document.fonts.status === "loaded"', 20000);
     await page.click('#start');
-    await page.waitFor('window.__opsix.engine.ready', 15000).catch(() => {});
+    await page.waitFor('window.__sideband.engine.ready', 15000).catch(() => {});
     if (preset > 0) await page.click(`#presets .preset:nth-child(${preset})`);
     for (const [code, text] of [['KeyZ', 'z'], ['KeyC', 'c'], ['KeyB', 'b']]) await page.key('keyDown', code, text);
     await new Promise((r) => setTimeout(r, 900));
