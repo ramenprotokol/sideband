@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>op-six · six-operator FM synthesizer</title>
+  <meta name="description" content="A six-operator FM synth, written in C, running in your browser's audio thread.">
+  <meta name="color-scheme" content="dark light">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#operators">Skip to the operators</a>
+
+  <header class="sheet-head">
+    <div class="sheet-meta">
+      <span>SERVICE MANUAL</span>
+      <span class="sep" aria-hidden="true">&mdash;</span>
+      <span>SECTION 4</span>
+      <span class="sep" aria-hidden="true">&middot;</span>
+      <span>TONE GENERATOR</span>
+    </div>
+    <div class="sheet-title">
+      <h1>op-six</h1>
+      <p class="lede">A six-operator FM synth, written in C, running in your browser&rsquo;s audio thread.</p>
+    </div>
+    <dl class="title-block" aria-label="Drawing title block">
+      <div><dt>MODEL</dt><dd>OP-SIX</dd></div>
+      <div><dt>OPERATORS</dt><dd>6</dd></div>
+      <div><dt>ALGORITHMS</dt><dd>8</dd></div>
+      <div><dt>VOICES</dt><dd>8</dd></div>
+    </dl>
+    <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">
+      <span class="theme-toggle-label">PAGE:</span> <span id="theme-name">TEAL PANEL</span>
+    </button>
+  </header>
+
+  <main>
+    <section class="section" id="monitor" aria-labelledby="h-monitor">
+      <h2 id="h-monitor"><span class="num">4.1</span> OUTPUT MONITOR</h2>
+      <div class="monitor-grid">
+        <figure class="crt">
+          <div class="crt-screen" id="scope-screen">
+            <canvas class="crt-grid" id="scope-grid" aria-hidden="true"></canvas>
+            <canvas class="crt-trace" id="scope" role="img" aria-label="Oscilloscope: the synth's output waveform"></canvas>
+            <p class="crt-idle" id="scope-idle">NO SIGNAL &mdash; PRESS START, OR PLAY A KEY</p>
+          </div>
+          <figcaption><span class="fig">FIG. 4-1</span> OSCILLOSCOPE <span class="cap-dim" id="scope-scale">0.125 FS/div &middot; triggered on rising zero crossing</span></figcaption>
+        </figure>
+        <figure class="crt">
+          <div class="crt-screen">
+            <canvas class="crt-grid" id="spectrum-grid" aria-hidden="true"></canvas>
+            <canvas class="crt-trace" id="spectrum" role="img" aria-label="Spectrum analyser: the output's frequency content"></canvas>
+          </div>
+          <figcaption><span class="fig">FIG. 4-2</span> SPECTRUM <span class="cap-dim">log frequency &middot; dBFS</span></figcaption>
+        </figure>
+      </div>
+      <dl class="readouts" aria-live="off">
+        <div><dt>OUT PEAK</dt><dd id="meter-peak">&mdash;</dd></div>
+        <div><dt>LIMITER</dt><dd id="meter-limit">&mdash;</dd></div>
+        <div><dt>VOICES</dt><dd id="meter-voices">0 / 8</dd></div>
+        <div><dt>SAMPLE RATE</dt><dd id="meter-rate">&mdash;</dd></div>
+      </dl>
+    </section>
+
+    <section class="section" id="voice" aria-labelledby="h-voice">
+      <h2 id="h-voice"><span class="num">4.2</span> VOICE</h2>
+      <div class="voice-grid">
+        <div class="presets" role="group" aria-labelledby="h-presets">
+          <h3 id="h-presets" class="sub">FACTORY VOICES</h3>
+          <div class="preset-list" id="presets"></div>
+          <p class="preset-note" id="preset-note"></p>
+        </div>
+        <div class="share">
+          <h3 class="sub">VOICE NAME &amp; LINK</h3>
+          <label class="name-field" for="patch-name">
+            <span class="name-label">NAME</span>
+            <input id="patch-name" type="text" maxlength="16" spellcheck="false" autocomplete="off" aria-describedby="name-help">
+          </label>
+          <p class="help" id="name-help">Up to 16 characters: A&ndash;Z, 0&ndash;9, space and . - + /</p>
+          <div class="share-row">
+            <button type="button" class="btn" id="copy-link">COPY LINK TO THIS SOUND</button>
+          </div>
+          <input class="link-fallback" id="link-fallback" type="text" readonly hidden aria-label="Link to this sound">
+          <p class="help">Every sound is a link: the whole voice rides in the address bar. Volume never does.</p>
+        </div>
+      </div>
+      <p class="message" id="message" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="section" id="algorithm" aria-labelledby="h-algo">
+      <h2 id="h-algo"><span class="num">4.3</span> ALGORITHM</h2>
+      <p class="section-note">An algorithm is the wiring between the six operators. Numbered boxes are operators; a box on the bottom line is a <em>carrier</em> (you hear it), a box above feeds its sine into the one below as <em>frequency modulation</em>. OP6 has a feedback loop in every algorithm.</p>
+      <div class="algo-layout">
+        <div class="algo-grid" id="algo-grid" role="radiogroup" aria-labelledby="h-algo"></div>
+        <div class="algo-side">
+          <div class="fader" id="feedback-fader"></div>
+          <p class="help">Feedback routes OP6 into itself. 0 is a pure sine; 7 approaches a sawtooth.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="operators" aria-labelledby="h-ops" tabindex="-1">
+      <h2 id="h-ops"><span class="num">4.4</span> OPERATORS</h2>
+      <p class="section-note">Each operator is a sine oscillator with a level and a four-stage envelope: it rises to L1 at rate R1, moves to L2 at R2, settles on L3 at R3 while the key is held, and falls to L4 at R4 when you let go. Levels step 0.75 dB; rates run from 40 s (0) to 1.5 ms (99) for a full sweep.</p>
+      <div class="op-grid" id="op-grid"></div>
+    </section>
+
+    <section class="section notes" id="notes" aria-labelledby="h-notes">
+      <h2 id="h-notes"><span class="num">4.5</span> NOTES</h2>
+      <div class="notes-grid">
+        <div>
+          <h3 class="sub">WHY C</h3>
+          <p>C is the native language of synth firmware and DSP. The engine in <code>src/opsix.c</code> is freestanding C11: no libc, no libm, no heap. Every buffer is static, so the per-sample loop never allocates and always does the same bounded work. Sine comes from a 4096-point table built at start-up from a Taylor series; <code>exp2</code> is a short polynomial. <code>zig cc</code> compiles it to WebAssembly, which runs inside an <em>AudioWorklet</em>, the browser&rsquo;s real-time audio thread, 128 samples at a time. The page itself only draws and sends messages.</p>
+          <p>The same C file also compiles natively for the unit tests, and both builds give bit-identical samples for the same patch and notes.</p>
+        </div>
+        <div>
+          <h3 class="sub">HEARING SAFETY</h3>
+          <ul class="spec-list">
+            <li>A peak limiter holds the synth at or below &minus;3 dBFS.</li>
+            <li>After the volume control, a hard ceiling stops anything above &minus;1 dBFS. Output never reaches 0 dBFS.</li>
+            <li>Volume starts at &minus;12 dB and fades in from silence; it is never stored in a link.</li>
+            <li>Every value in a shared link is checked and clamped, in the page and again in the C engine.</li>
+            <li>The OUT PEAK and LIMITER readouts are measured from the audio thread, not estimated.</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="sub">PLAYING</h3>
+          <ul class="spec-list">
+            <li>Two octaves on the computer keyboard: <kbd>Z</kbd>&ndash;<kbd>M</kbd> with <kbd>S D G H J</kbd>, and <kbd>Q</kbd>&ndash;<kbd>U</kbd> with <kbd>2 3 5 6 7</kbd>. <kbd>-</kbd> and <kbd>=</kbd> shift the octave.</li>
+            <li>Or click and touch the keys below. A MIDI keyboard works where the browser offers Web MIDI.</li>
+            <li>Eight voices. A ninth note takes over the oldest voice, released notes first.</li>
+          </ul>
+          <h3 class="sub">COLOPHON</h3>
+          <p>op-six is made in the tradition of 1980s six-operator FM synths and is not affiliated with any manufacturer. Set in IBM Plex, served by Google Fonts. See <a href="THIRD-PARTY-NOTICES.txt">third-party notices</a>. Built by Ramen Protocol with AI assistance (Claude). MIT licensed.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="dock" id="dock" role="region" aria-label="Keyboard and output controls">
+    <div class="transport">
+      <button type="button" class="btn start" id="start" aria-describedby="audio-status">START AUDIO</button>
+      <div class="fader volume" id="volume-fader"></div>
+      <div class="octave" role="group" aria-label="Octave">
+        <button type="button" class="btn small" id="oct-down" aria-label="Octave down">&minus;</button>
+        <span class="oct-readout" id="oct-readout" aria-live="polite">C3</span>
+        <button type="button" class="btn small" id="oct-up" aria-label="Octave up">+</button>
+      </div>
+      <button type="button" class="btn" id="panic">ALL NOTES OFF</button>
+      <button type="button" class="btn" id="midi">CONNECT MIDI</button>
+      <p class="audio-status" id="audio-status" role="status" aria-live="polite">Audio is off. Press START AUDIO or play a key.</p>
+    </div>
+    <div class="keys" id="keys" role="group" aria-label="On-screen keyboard, two octaves. The computer keyboard plays the same notes."></div>
+  </div>
+
+  <noscript><p class="noscript">op-six needs JavaScript and WebAssembly to make sound.</p></noscript>
+</body>
+</html>

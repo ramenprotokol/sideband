@@ -1,0 +1,31 @@
+op-six: third-party notices
+===========================
+
+What ships in this site
+-----------------------
+Nothing in this site's files was written by a third party.
+
+- opsix.wasm is compiled from op-six's own C source (src/opsix.c) with
+  `zig cc -target wasm32-freestanding -nostdlib`. No C library, maths
+  library or compiler runtime is linked into it; the build fails if the
+  module would need anything from outside.
+- The JavaScript, HTML, CSS and SVG files are op-six's own code
+  (MIT licence, see LICENSE in the source repository).
+
+What the page loads from elsewhere
+----------------------------------
+The page asks Google Fonts for two typefaces. They are not copied into
+this site; the visitor's browser downloads them from Google.
+
+  IBM Plex Mono
+  IBM Plex Sans Condensed
+    Copyright (c) IBM Corp. (the IBM Plex project), with Reserved Font Name "Plex".
+    Licence: SIL Open Font License, Version 1.1
+    Licence text: https://openfontlicense.org/open-font-license-official-text/
+    Source: https://github.com/IBM/plex
+    Served by: https://fonts.google.com/ (version as served at load time; not pinned)
+
+Tools used to build (not shipped)
+---------------------------------
+Zig 0.16 (`zig cc`, which bundles Clang/LLVM) compiles the C. Node.js runs
+the build script and the tests. Neither is included in the site.

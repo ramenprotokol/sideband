@@ -1,0 +1,6 @@
+# Cloudflare Pages (static only). Build first with `npm run build`, then
+# upload dist/ (see the README). Deliberately no account_id here: the owner
+# deploys through a guarded script, never a bare `wrangler` command.
+name = "op-six"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-09-26"
