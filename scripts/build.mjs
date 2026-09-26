@@ -16,7 +16,7 @@ export const EXPORTS = [
   'sideband_init', 'sideband_sample_rate',
   'sideband_set_param', 'sideband_get_param', 'sideband_param_min', 'sideband_param_max', 'sideband_param_default',
   'sideband_note_on', 'sideband_note_off', 'sideband_all_notes_off', 'sideband_panic', 'sideband_set_volume',
-  'sideband_render', 'sideband_monitor', 'sideband_take_peak', 'sideband_gain_reduction', 'sideband_active_voices',
+  'sideband_render', 'sideband_monitor', 'sideband_take_peak', 'sideband_gain_reduction', 'sideband_comp_gain', 'sideband_active_voices',
   'sideband_algo_mod_mask', 'sideband_algo_carrier_mask', 'sideband_algo_feedback_op',
 ];
 

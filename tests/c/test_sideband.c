@@ -83,7 +83,7 @@ static double rms(const float *x, int n) {
 }
 
 /* Frequency from interpolated rising zero crossings. */
-static double measure_hz(const float *x, int n) {
+static double measure_hz_at(const float *x, int n, double rate) {
   double first = -1.0, last = -1.0;
   int count = 0;
   for (int i = 1; i < n; i++) {
@@ -95,7 +95,21 @@ static double measure_hz(const float *x, int n) {
     }
   }
   if (count < 2) return 0.0;
-  return (count - 1) * (double)SR / (last - first);
+  return (count - 1) * rate / (last - first);
+}
+
+static double measure_hz(const float *x, int n) { return measure_hz_at(x, n, (double)SR); }
+
+/* Largest sample-to-sample step in x[a..b). */
+static float max_step(const float *x, int a, int b) {
+  float m = 0.0f;
+  for (int i = a > 0 ? a : 1; i < b; i++) if (fabsf(x[i] - x[i - 1]) > m) m = fabsf(x[i] - x[i - 1]);
+  return m;
+}
+
+static Voice *voice_for(int note) {
+  for (int i = 0; i < SIDEBAND_VOICES; i++) if (g_voice[i].active && g_voice[i].note == note) return &g_voice[i];
+  return NULL;
 }
 
 /* Fraction of the signal's power at exactly `hz` (the window must hold a
@@ -159,6 +173,19 @@ static void test_exp2_accuracy(void) {
   CHECK(exp2_approx(NAN) == 0.0f);
   CHECK(exp2_approx(-1000.0f) == 0.0f);
   CHECK(is_finite(exp2_approx(1000.0f)));
+}
+
+static void test_log2_accuracy(void) {
+  double worst = 0.0;
+  for (int i = 0; i <= 40000; i++) {
+    float x = exp2f(-40.0f + 50.0f * (float)i / 40000.0f) * (1.0f + 0.37f * (float)(i % 7) / 7.0f);
+    double err = fabs((double)log2_approx(x) - log2((double)x));
+    if (err > worst) worst = err;
+  }
+  CHECKF(worst < 3e-6, "worst log2 error %g", worst);
+  CHECK(log2_approx(1.0f) == 0.0f);
+  CHECK(log2_approx(0.0f) == -126.0f && log2_approx(-1.0f) == -126.0f && log2_approx(NAN) == -126.0f);
+  CHECK(log2_approx(INFINITY) == 128.0f);
 }
 
 static void test_turns_to_phase(void) {
@@ -260,7 +287,7 @@ static void test_envelope_stage_times(void) {
   setp(0, SIDEBAND_OP_L2, 49); setp(0, SIDEBAND_OP_R2, 30);
   setp(0, SIDEBAND_OP_L3, 49); setp(0, SIDEBAND_OP_R3, 10);
   setp(0, SIDEBAND_OP_R4, 70);
-  OpState o = {0u, 0.0, 0, 1.0f};
+  OpState o = {.env = 0.0, .stage = 0, .gain = 1.0f};
 
   /* Rising segments close a fixed share of the gap to RISE_TOP each sample:
    * gap_n = gap_0 (1 - a)^n, so the attack takes ln(gap_0/gap_end)/-ln(1-a). */
@@ -292,11 +319,11 @@ static void test_envelope_rate_extremes(void) {
   sideband_init((float)SR);
   double fastest = 99.0 / g_rate_step[99] / SR, slowest = 99.0 / g_rate_step[0] / SR;
   /* The slowest rate keeps its timing at the highest sample rate too. */
-  sideband_init(192000.0f);
+  sideband_init(384000.0f);
   setp(0, SIDEBAND_OP_L4, 0); setp(0, SIDEBAND_OP_L1, 99); setp(0, SIDEBAND_OP_R1, 0);
-  OpState slow = {0u, 0.0, 0, 1.0f};
-  int slow_ticks = ticks_until_stage_changes(&slow, 0, 192000 * 60);
-  CHECKF(fabs(slow_ticks / 192000.0 - 40.0) < 0.02, "rate 0 at 192 kHz took %g s", slow_ticks / 192000.0);
+  OpState slow = {.env = 0.0, .stage = 0, .gain = 1.0f};
+  int slow_ticks = ticks_until_stage_changes(&slow, 0, 384000 * 60);
+  CHECKF(fabs(slow_ticks / 384000.0 - 40.0) < 0.02, "rate 0 at 384 kHz took %g s", slow_ticks / 384000.0);
   sideband_init((float)SR);
   CHECKF(fabs(fastest - 0.0015) < 1e-6, "rate 99 sweep %g s", fastest);
   CHECKF(fabs(slowest - 40.0) < 1e-3, "rate 0 sweep %g s", slowest);
@@ -309,7 +336,7 @@ static void test_envelope_rate_extremes(void) {
 static void test_attack_eases_in(void) {
   sideband_init((float)SR);
   setp(0, SIDEBAND_OP_L4, 0); setp(0, SIDEBAND_OP_L1, 99); setp(0, SIDEBAND_OP_R1, 40);
-  OpState o = {0u, 0.0, 0, 1.0f};
+  OpState o = {.env = 0.0, .stage = 0, .gain = 1.0f};
   double first = 0.0, last = 0.0, prev = 0.0;
   while (o.stage == 0) {
     env_tick(&o, 0);
@@ -327,7 +354,7 @@ static void test_envelope_stays_in_range(void) {
   for (int trial = 0; trial < 400; trial++) {
     sideband_init((float)SR);
     for (int off = SIDEBAND_OP_R1; off <= SIDEBAND_OP_L4; off++) setp(0, off, rng_int(0, 99));
-    OpState o = {0u, (double)OPP(0, SIDEBAND_OP_L4), 0, 1.0f};
+    OpState o = {.env = (double)OPP(0, SIDEBAND_OP_L4), .stage = 0, .gain = 1.0f};
     for (int i = 0; i < 20000; i++) {
       if (i == 12000) o.stage = 3;
       if (i % 3000 == 0) setp(0, SIDEBAND_OP_L1 + rng_int(0, 3), rng_int(0, 99)); /* live edits */
@@ -561,6 +588,180 @@ static void test_silence_without_notes(void) {
   CHECK(peak(buf_a, SR / 4) == 0.0f && peak(buf_m, SR / 4) == 0.0f);
 }
 
+
+/* ---------------------------------------------------------------------- */
+/* Smoothness: edits, algorithm changes, panic and retriggers never step    */
+
+/* An operator above Nyquist would only alias: it fades out between 0.43 and
+ * 0.47 of the sample rate instead of being pinned just below Nyquist. */
+static void test_operators_fade_out_near_nyquist(void) {
+  sideband_init((float)SR);
+  CHECK(nyquist_fade(0.40f * SR) == 1.0f);
+  CHECKF(fabsf(nyquist_fade(0.45f * SR) - 0.5f) < 1e-4f, "fade at 0.45 sr %g", (double)nyquist_fade(0.45f * SR));
+  CHECK(nyquist_fade(0.47f * SR) == 0.0f && nyquist_fade(3.0f * SR) == 0.0f);
+  /* A carrier at x31.99 on C7 (67 kHz) is silent, not a tone pinned at 23.5 kHz. */
+  fresh(7, 0);
+  op_organ(0, 99, 31); setp(0, SIDEBAND_OP_FINE, 99);
+  sideband_note_on(96, 127);
+  render(NULL, buf_m, SR / 4);
+  CHECKF(rms(buf_m, SR / 4) == 0.0, "ultrasonic carrier rms %g", rms(buf_m, SR / 4));
+  /* The same carrier on C2 (2.1 kHz) plays at full level. */
+  fresh(7, 0);
+  op_organ(0, 99, 31); setp(0, SIDEBAND_OP_FINE, 99);
+  sideband_note_on(36, 127);
+  render(NULL, buf_m, SR / 4);
+  CHECK(rms(buf_m + SR / 8, SR / 8) > 0.1);
+}
+
+/* A level edit glides over about 20 ms (two 10 ms one-pole stages, every
+ * sample) instead of stepping at the next block. */
+static void test_level_edits_are_smoothed(void) {
+  fresh(7, 0);
+  op_organ(0, 99, 1);
+  sideband_note_on(69, 127);
+  render(NULL, NULL, SR / 4);
+  Voice *v = voice_for(69);
+  CHECK(v != NULL);
+  if (!v) return;
+  double start = v->op[0].gain, target = (double)level_amp(40.0f);
+  setp(0, SIDEBAND_OP_LEVEL, 40);
+  render(NULL, NULL, SIDEBAND_BLOCK);
+  double moved = (start - v->op[0].gain) / (start - target);
+  CHECKF(moved > 0.0f && moved < 0.1f, "after one block the gain moved %.3f of the way", (double)moved);
+  render(NULL, NULL, SR / 4);
+  CHECKF(v->op[0].gain == target, "after 250 ms gain %g, target %g", v->op[0].gain, target);
+  /* The same for a ratio edit: the frequency glides, then lands exactly. */
+  uint32_t want = hz_to_inc(880.0f);
+  setp(0, SIDEBAND_OP_COARSE, 2);
+  render(NULL, NULL, SIDEBAND_BLOCK);
+  CHECKF(v->op[0].inc > (double)hz_to_inc(440.0f) && v->op[0].inc < (double)want, "increment mid-glide %g", v->op[0].inc);
+  render(NULL, NULL, SR / 4);
+  CHECKF(v->op[0].inc == (double)want, "increment %f, want %u", v->op[0].inc, want);
+}
+
+/* Changing the algorithm under a held note crossfades over 10 ms: the
+ * waveform never steps further than either sound does on its own. */
+#define T0 (SIDEBAND_BLOCK * 188) /* about 0.5 s, a whole number of blocks */
+static void test_algorithm_change_crossfades(void) {
+  fresh(1, 6);
+  for (int k = 0; k < SIDEBAND_OPS; k++) op_organ(k, k == 0 || k == 3 ? 99 : 80, 1);
+  sideband_note_on(60, 100);
+  render(buf_a, NULL, T0);
+  sideband_set_param(SIDEBAND_P_ALGO, 3); /* TOWER: a very different sound */
+  CHECK(g_algo == 1);                     /* nothing jumps before the next block */
+  render(buf_a + T0, NULL, T0);
+  CHECK(g_algo == 3 && g_xf == 1.0f);
+  float old_sound = max_step(buf_a, T0 - SR / 20, T0);
+  float new_sound = max_step(buf_a, T0 + SR / 10, T0 + SR / 5);
+  float bound = old_sound > new_sound ? old_sound : new_sound;
+  float during = max_step(buf_a, T0, T0 + SR / 50);
+  CHECKF(during <= 1.1f * bound, "max step during the crossfade %g; old sound %g, new sound %g",
+         (double)during, (double)old_sound, (double)new_sound);
+  CHECKF(fabsf(buf_a[T0] - buf_a[T0 - 1]) <= 1.1f * old_sound, "step at the switch %g",
+         (double)fabsf(buf_a[T0] - buf_a[T0 - 1]));
+  /* A second change during the crossfade waits for it to finish. */
+  sideband_set_param(SIDEBAND_P_ALGO, 0);
+  render(NULL, NULL, SIDEBAND_BLOCK);
+  CHECK(g_algo == 0 && g_xf < 1.0f);
+  sideband_set_param(SIDEBAND_P_ALGO, 7);
+  render(NULL, NULL, SIDEBAND_BLOCK);
+  CHECK(g_algo == 0);
+  render(NULL, NULL, SR / 20);
+  CHECK(g_algo == 7 && g_xf == 1.0f);
+  /* With nothing sounding, a change applies at once. */
+  sideband_panic();
+  render(NULL, NULL, SR / 10);
+  CHECK(sideband_active_voices() == 0);
+  sideband_set_param(SIDEBAND_P_ALGO, 4);
+  CHECK(g_algo == 4 && g_xf == 1.0f);
+}
+
+/* Panic fades every voice out over 5 ms instead of cutting it. */
+static void test_panic_fades_out(void) {
+  fresh(7, 0);
+  op_organ(0, 99, 1);
+  sideband_set_volume(1.0f);
+  sideband_note_on(69, 127);
+  sideband_note_on(76, 127);
+  render(buf_a, NULL, T0);
+  sideband_panic();
+  render(buf_a + T0, NULL, T0);
+  float before = max_step(buf_a, T0 - SR / 20, T0);
+  float after = max_step(buf_a, T0, T0 + SR / 10);
+  CHECKF(after <= before * 1.001f, "max step after panic %g, before %g", (double)after, (double)before);
+  int fade_len = (int)(0.005 * SR);
+  CHECKF(fabsf(buf_a[T0 + fade_len / 2]) > 0.0f, "still fading halfway through");
+  CHECK(peak(buf_a + T0 + fade_len + SIDEBAND_BLOCK, SR / 20) < 1e-3f);
+  CHECK(sideband_active_voices() == 0);
+}
+
+/* A drone (L4 > 0) played again while it fades out comes back up from where
+ * it is instead of jumping to full level. */
+static void test_retrigger_during_end_fade_is_smooth(void) {
+  const int half_fade = SIDEBAND_BLOCK * 19; /* about 50 ms of the 0.1 s end fade */
+  fresh(7, 0);
+  op_organ(0, 99, 1); setp(0, SIDEBAND_OP_L4, 99); setp(0, SIDEBAND_OP_R4, 99);
+  sideband_set_volume(1.0f);
+  sideband_note_on(60, 100);
+  render(buf_a, NULL, T0);
+  sideband_note_off(60);
+  render(buf_a + T0, NULL, half_fade);
+  Voice *v = voice_for(60);
+  CHECK(v != NULL && v->ending && v->fade < 0.8f && v->fade > 0.2f);
+  if (!v) return;
+  int at = T0 + half_fade;
+  sideband_note_on(60, 100);
+  render(buf_a + at, NULL, T0);
+  float before = max_step(buf_a, T0 - SR / 20, T0);
+  float after = max_step(buf_a, at, at + SR / 100);
+  CHECKF(after <= 1.01f * before, "max step after retrigger %g, steady %g", (double)after, (double)before);
+  CHECK(v->fade == 1.0f && !v->ending);
+}
+
+/* The compressor leaves a quiet note alone, pulls a dense chord down, never
+ * adds gain, and keeps louder input louder. */
+static void test_compressor(void) {
+  fresh(7, 0);
+  op_organ(0, 80, 1);
+  sideband_note_on(69, 100);
+  render(NULL, NULL, SR / 2);
+  CHECKF(sideband_comp_gain() == 1.0f, "quiet sine: comp gain %g", (double)sideband_comp_gain());
+
+  fresh(7, 0);
+  for (int k = 0; k < SIDEBAND_OPS; k++) op_organ(k, 99, k + 1);
+  for (int n = 0; n < 8; n++) sideband_note_on(48 + 4 * n, 127);
+  render(NULL, NULL, SR / 2);
+  CHECKF(sideband_comp_gain() < 0.5f, "dense chord: comp gain %g", (double)sideband_comp_gain());
+
+  double prev = 0.0;
+  int monotonic = 1;
+  for (int level = 60; level <= 99; level += 3) {
+    fresh(7, 0);
+    op_organ(0, level, 1);
+    sideband_note_on(69, 100);
+    render(NULL, buf_m, SR);
+    double r = rms(buf_m + SR / 2, SR / 2);
+    if (!(r > prev)) monotonic = 0;
+    prev = r;
+    if (!(sideband_comp_gain() <= 1.0f)) monotonic = 0;
+  }
+  CHECK(monotonic);
+}
+
+/* Up to 384 kHz is supported and stays in tune. */
+static void test_high_sample_rate(void) {
+  sideband_init(384000.0f);
+  sideband_set_param(SIDEBAND_P_ALGO, 7);
+  sideband_note_on(69, 100);
+  static float hi[384000 / 2];
+  for (int i = 0; i < 384000 / 2; i += SIDEBAND_BLOCK) {
+    sideband_render();
+    for (int s = 0; s < SIDEBAND_BLOCK; s++) hi[i + s] = g_mon[s];
+  }
+  double hz = measure_hz_at(hi + 38400, 384000 / 2 - 38400, 384000.0);
+  CHECKF(fabs(hz - 440.0) < 0.02, "A4 at 384 kHz measured %.4f Hz", hz);
+}
+
 /* ---------------------------------------------------------------------- */
 /* Parameters, voices, determinism                                         */
 
@@ -644,7 +845,7 @@ static void ep_like_patch(void) {
 }
 
 static uint32_t g_golden_hash;
-#define GOLDEN_HASH 0x4917c7b1u
+#define GOLDEN_HASH 0x900e4f46u
 
 static void test_determinism(void) {
   const int n = SR; /* 1 s */
@@ -678,7 +879,9 @@ static void test_determinism(void) {
 static void test_sample_rate_clamping(void) {
   sideband_init(0.0f);      CHECK(sideband_sample_rate() == 8000.0f);
   sideband_init(NAN);       CHECK(sideband_sample_rate() == 48000.0f);
-  sideband_init(1e9f);      CHECK(sideband_sample_rate() == 192000.0f);
+  sideband_init(1e9f);      CHECK(sideband_sample_rate() == 384000.0f);
+  sideband_init(384000.0f); CHECK(sideband_sample_rate() == 384000.0f);
+  sideband_init(192000.0f); CHECK(sideband_sample_rate() == 192000.0f);
   sideband_init(-INFINITY); CHECK(sideband_sample_rate() == 48000.0f);
   sideband_init(44100.0f);  CHECK(sideband_sample_rate() == 44100.0f);
 }
@@ -687,14 +890,14 @@ static void test_sample_rate_clamping(void) {
  * notes, velocities, volumes and sample rates. Every sample must be finite
  * and inside the ceiling. */
 static void test_fuzz_no_nan_no_overs(void) {
-  static const float rates[] = {8000.0f, 22050.0f, 44100.0f, 48000.0f, 96000.0f, 192000.0f};
+  static const float rates[] = {8000.0f, 22050.0f, 44100.0f, 48000.0f, 96000.0f, 192000.0f, 384000.0f};
   static const float specials[] = {NAN, INFINITY, -INFINITY, 1e30f, -1e30f, 3.4e38f, -0.0f};
   rng_state = 20260926u;
   int finite = 1, within = 1, env_ok = 1;
   float worst = 0.0f;
   const int iterations = 600;
   for (int it = 0; it < iterations; it++) {
-    sideband_init(rates[rng_int(0, 5)]);
+    sideband_init(rates[rng_int(0, 6)]);
     for (int id = 0; id < SIDEBAND_PARAMS; id++) {
       int kind = rng_int(0, 9);
       float mn = sideband_param_min(id), mx = sideband_param_max(id);
@@ -721,6 +924,7 @@ static void test_fuzz_no_nan_no_overs(void) {
         if (fabsf(o[s]) > SIDEBAND_CEILING || fabsf(g_mon[s]) > SIDEBAND_LIMIT_THRESHOLD * 1.000001f) within = 0;
         if (fabsf(o[s]) > worst) worst = fabsf(o[s]);
       }
+      if (!(sideband_comp_gain() <= 1.0f && sideband_comp_gain() > 0.0f)) within = 0;
       for (int i = 0; i < SIDEBAND_VOICES; i++)
         for (int k = 0; k < SIDEBAND_OPS; k++)
           if (!(g_voice[i].op[k].env >= 0.0 && g_voice[i].op[k].env <= 99.0)) env_ok = 0;
@@ -736,6 +940,7 @@ static void test_fuzz_no_nan_no_overs(void) {
 int main(void) {
   RUN(test_sine_table_accuracy);
   RUN(test_exp2_accuracy);
+  RUN(test_log2_accuracy);
   RUN(test_turns_to_phase);
   RUN(test_level_to_amplitude);
   RUN(test_operator_frequency_maths);
@@ -753,6 +958,13 @@ int main(void) {
   RUN(test_limiter_under_extreme_patches);
   RUN(test_volume);
   RUN(test_silence_without_notes);
+  RUN(test_operators_fade_out_near_nyquist);
+  RUN(test_level_edits_are_smoothed);
+  RUN(test_algorithm_change_crossfades);
+  RUN(test_panic_fades_out);
+  RUN(test_retrigger_during_end_fade_is_smooth);
+  RUN(test_compressor);
+  RUN(test_high_sample_rate);
   RUN(test_parameter_clamping);
   RUN(test_voice_allocation);
   RUN(test_released_drone_still_ends);

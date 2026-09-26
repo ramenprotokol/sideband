@@ -20,7 +20,7 @@ const DESCRIPTIONS = [
   },
   {
     name: 'BELL',
-    note: 'Inharmonic pairs (x3.5, x4.4, x1.41 modulators) ring out for seconds, with a low hum at x0.5.',
+    note: 'Three pairs ring out for seconds: carriers at x1, x3.52 and x0.5 (a low hum), each struck by an inharmonic modulator (x4.50, x5.60, x1.41).',
     algo: 0,
     feedback: 0,
     ops: [
@@ -34,16 +34,16 @@ const DESCRIPTIONS = [
   },
   {
     name: 'BASS',
-    note: 'Two three-operator stacks an octave down (x0.5 carriers); the top of each stack plucks and fades.',
+    note: 'A plucked bass an octave down: one stack (x0.5 carrier, x1 modulator) gives the odd harmonics, the other (x1 on x1) the even ones, so it still carries on small speakers. The attack is bright and settles.',
     algo: 1,
-    feedback: 4,
+    feedback: 5,
     ops: [
-      { c: 0, lv: 99, r: [99, 50, 35, 70], l: [99, 90, 80, 0] },
-      { c: 0, lv: 84, r: [99, 55, 38, 70], l: [99, 86, 76, 0] },
-      { c: 1, lv: 72, r: [99, 62, 40, 70], l: [99, 70, 60, 0] },
-      { c: 0, d: 2, lv: 90, r: [99, 45, 35, 70], l: [99, 86, 72, 0] },
-      { c: 1, lv: 78, r: [99, 60, 42, 70], l: [99, 78, 66, 0] },
-      { c: 3, lv: 66, r: [99, 72, 50, 70], l: [99, 40, 0, 0] },
+      { c: 0, lv: 99, r: [99, 48, 36, 70], l: [99, 90, 84, 0] },
+      { c: 1, lv: 89, r: [99, 38, 38, 70], l: [99, 86, 85, 0] },
+      { c: 1, lv: 86, r: [99, 48, 45, 70], l: [99, 0, 0, 0] },
+      { c: 1, d: 3, lv: 94, r: [99, 48, 36, 70], l: [99, 90, 84, 0] },
+      { c: 1, lv: 87, r: [99, 38, 38, 70], l: [99, 84, 83, 0] },
+      { c: 3, lv: 78, r: [99, 48, 45, 70], l: [99, 0, 0, 0] },
     ],
   },
   {

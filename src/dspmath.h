@@ -1,5 +1,5 @@
 /*
- * Small, freestanding maths for the synth: a sine table and a fast exp2.
+ * Small, freestanding maths for the synth: a sine table, a fast exp2 and log2.
  * No libm. Everything here is plain IEEE float/double arithmetic, so it gives
  * the same bits on every WebAssembly engine.
  */
@@ -82,7 +82,31 @@ static inline float exp2_approx(float x) {
   return p * scale.f;
 }
 
+/* log2(x) for the compressor's level detector. Absolute error below 3e-6
+ * for normal positive floats; zero, negative, denormal or NaN input gives
+ * -126 and huge input saturates, so the result is always finite. */
+static inline float log2_approx(float x) {
+  if (!(x >= 1.1754944e-38f)) return -126.0f;
+  if (!(x < 3.0e38f)) return 128.0f;
+  union { float f; uint32_t u; } v;
+  v.f = x;
+  int e = (int)((v.u >> 23) & 0xffu) - 127;
+  v.u = (v.u & 0x007fffffu) | 0x3f800000u;     /* mantissa m in [1, 2) */
+  float m = v.f;
+  if (m > 1.41421356f) { m *= 0.5f; e++; }     /* m in [0.707, 1.414] */
+  /* log2(m) = (2 / ln 2) atanh(t), t = (m - 1) / (m + 1), |t| <= 0.172 */
+  float t = (m - 1.0f) / (m + 1.0f);
+  float t2 = t * t;
+  float p = 0.32059890f;
+  p = p * t2 + 0.41219858f;
+  p = p * t2 + 0.57707802f;
+  p = p * t2 + 0.96179669f;
+  p = p * t2 + 2.88539008f;
+  return (float)e + t * p;
+}
+
 static inline float absf(float x) { return x < 0.0f ? -x : x; }
+static inline double absd(double x) { return x < 0.0 ? -x : x; }
 
 static inline int is_finite(float x) {
   return x == x && x < 3.0e38f && x > -3.0e38f;

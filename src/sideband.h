@@ -7,8 +7,12 @@
  *
  * Signal flow per sample:
  *   voices (6 operators each, routed by one of 8 algorithms)
- *   -> mix -> DC blocker -> peak limiter (-3 dBFS) -> monitor tap
- *   -> smoothed volume -> hard ceiling (-1 dBFS) -> output
+ *   -> mix -> DC blocker -> gentle RMS compressor -> peak limiter (-3 dBFS)
+ *   -> monitor tap -> smoothed volume -> hard ceiling (-1 dBFS) -> output
+ *
+ * Every edit that changes the sound while a note is held is smoothed per
+ * sample (operator levels, frequencies, velocity, volume), and an algorithm
+ * change crossfades, so nothing a fader or a key does can step the waveform.
  */
 #ifndef SIDEBAND_H
 #define SIDEBAND_H
@@ -43,6 +47,11 @@ enum {
 #define SIDEBAND_CEILING         0.89125094f /* -1 dBFS: nothing rendered is louder */
 #define SIDEBAND_DEFAULT_VOLUME  0.25f       /* -12 dB */
 
+/* Supported sample rates. sideband_init() clamps to this range; the host
+ * (worklet.js) refuses to start outside it rather than play out of tune. */
+#define SIDEBAND_MIN_RATE 8000.0f
+#define SIDEBAND_MAX_RATE 384000.0f
+
 void   sideband_init(float sample_rate);
 float  sideband_sample_rate(void);
 
@@ -55,13 +64,14 @@ float  sideband_param_default(int id);
 void   sideband_note_on(int note, int velocity);
 void   sideband_note_off(int note);
 void   sideband_all_notes_off(void);
-void   sideband_panic(void);
+void   sideband_panic(void);                     /* every voice fades out over 5 ms */
 float  sideband_set_volume(float gain);        /* linear 0..1, returns the stored value */
 
 float *sideband_render(void);                  /* renders SIDEBAND_BLOCK samples */
 float *sideband_monitor(void);                 /* the same block before the volume stage */
 float  sideband_take_peak(void);               /* output peak since the last call */
 float  sideband_gain_reduction(void);          /* limiter gain at the end of the last block */
+float  sideband_comp_gain(void);               /* compressor gain at the end of the last block */
 int    sideband_active_voices(void);
 
 int    sideband_algo_mod_mask(int algo, int op); /* bit j set = OP(j+1) modulates OP(op+1) */

@@ -15,13 +15,13 @@ import { dist, loadEngine, fnv1a, peak, spectrum, peakHz } from './helpers.mjs';
 const SR = 48000;
 const CEILING = 0.89125094; // -1 dBFS, SIDEBAND_CEILING
 const THRESHOLD = 0.70794578; // -3 dBFS, SIDEBAND_LIMIT_THRESHOLD
-const GOLDEN_HASH = 0x4917c7b1; // same constant as tests/c/test_sideband.c
+const GOLDEN_HASH = 0x900e4f46; // same constant as tests/c/test_sideband.c
 
 test('the WASM module is self-contained and exports the engine API', () => {
   const mod = new WebAssembly.Module(readFileSync(join(dist, 'sideband.wasm')));
   assert.deepEqual(WebAssembly.Module.imports(mod), [], 'no imports: no libc, no JS callbacks');
   const names = WebAssembly.Module.exports(mod).map((e) => e.name);
-  for (const n of ['sideband_init', 'sideband_render', 'sideband_monitor', 'sideband_set_param', 'sideband_note_on', 'sideband_note_off', 'sideband_set_volume', 'memory']) {
+  for (const n of ['sideband_init', 'sideband_render', 'sideband_monitor', 'sideband_set_param', 'sideband_note_on', 'sideband_note_off', 'sideband_set_volume', 'sideband_comp_gain', 'sideband_gain_reduction', 'memory']) {
     assert.ok(names.includes(n), `missing export ${n}`);
   }
 });
@@ -110,7 +110,10 @@ test('every preset: the strongest peak is on the key, output is finite, audible 
     x.sideband_init(SR);
     setPatch(p.values);
     x.sideband_set_volume(1);
-    const note = p.name === 'BASS' ? 81 : 69; // the bass sounds an octave down (x0.5 carriers)
+    // BASS is played in its own register: key C3 sounds C2 (x0.5 carriers).
+    const bass = p.name === 'BASS';
+    const note = bass ? 48 : 69;
+    const f0 = bass ? 440 * 2 ** ((48 - 69) / 12) * 0.5 : 440;
     x.sideband_note_on(note, 100);
     const held = render(SR * 1.5);
     x.sideband_note_off(note);
@@ -120,12 +123,23 @@ test('every preset: the strongest peak is on the key, output is finite, audible 
     assert.ok(peak(held.out) <= CEILING, `${p.name}: over the ceiling`);
     assert.ok(peak(held.mon) > 0.05, `${p.name}: too quiet (${peak(held.mon)})`);
     const start = p.name === 'PAD' ? SR : 2048; // the pad takes its time
-    const hz = peakHz(spectrum(held.mon, start, 8192), SR);
+    const mag = spectrum(held.mon, start, 8192);
+    const hz = peakHz(mag, SR);
     // BELL is inharmonic by design; PAD's detuned pair beats, so its loudest
     // partial may be the octave. Every other preset peaks on the fundamental.
-    const harmonic = Math.max(1, Math.round(hz / 440));
-    if (p.name !== 'BELL') assert.ok(Math.abs(hz - 440 * harmonic) < 2, `${p.name}: strongest peak at ${hz.toFixed(1)} Hz`);
+    const harmonic = Math.max(1, Math.round(hz / f0));
+    if (p.name !== 'BELL') assert.ok(Math.abs(hz - f0 * harmonic) < 2, `${p.name}: strongest peak at ${hz.toFixed(1)} Hz`);
     if (!['BELL', 'PAD'].includes(p.name)) assert.equal(harmonic, 1, `${p.name}: strongest peak at ${hz.toFixed(1)} Hz`);
+    if (bass) {
+      // A bass needs harmonics a small speaker can reproduce: in the sustain,
+      // harmonics 2 to 5 sit within 12 dB of the fundamental.
+      const sus = spectrum(held.mon, Math.round(SR * 0.6), 16384);
+      const at = (h) => { const i = Math.round((f0 * h * 16384) / SR); return Math.max(sus[i - 1], sus[i], sus[i + 1]); };
+      for (const h of [2, 3, 4, 5]) {
+        const rel = 20 * Math.log10(at(h) / at(1));
+        assert.ok(rel > -12 && rel < 0, `BASS harmonic ${h} is ${rel.toFixed(1)} dB re the fundamental`);
+      }
+    }
     assert.ok(peak(released.out.subarray(SR)) < 0.02, `${p.name}: still loud a second after release`);
     assert.equal(x.sideband_active_voices() <= 1, true);
   }
@@ -150,6 +164,74 @@ test('nothing a link can express exceeds the ceiling: hostile patches at full vo
   }
   assert.ok(worst <= CEILING && worst < 1, `worst output ${worst}`);
   assert.ok(worstMon <= THRESHOLD * 1.000001, `worst monitor ${worstMon}`);
+});
+
+// Momentary loudness: the loudest 100 ms RMS of the audible band (a 40 Hz
+// high-pass removes sub-audio content, which a crafted link can be full of).
+function momentaryDb(x, sr = SR) {
+  const a = Math.exp((-2 * Math.PI * 40) / sr);
+  const y = new Float32Array(x.length);
+  let px = 0, py = 0;
+  for (let i = 0; i < x.length; i++) { py = a * (py + x[i] - px); px = x[i]; y[i] = py; }
+  const w = sr / 10;
+  let best = 0;
+  for (let i = 0; i + w <= y.length; i += w / 2) {
+    let e = 0;
+    for (let j = i; j < i + w; j++) e += y[j] * y[j];
+    best = Math.max(best, Math.sqrt(e / w));
+  }
+  return 20 * Math.log10(best);
+}
+
+test('loudness: presets are not whisper-quiet, and dense patches land close to them (default volume)', () => {
+  const level = (values, notes, velocity, seconds) => {
+    const { x, render, setPatch } = loadEngine();
+    x.sideband_init(SR);
+    setPatch(values);
+    render(SR / 2); // the volume glides in from silence first
+    notes.forEach((n) => x.sideband_note_on(n, velocity));
+    return momentaryDb(render(SR * seconds).out);
+  };
+  const presets = PRESETS.map((p) => level(p.values, [p.name === 'BASS' ? 48 : 60], 100, 1.5));
+  presets.forEach((db, i) => assert.ok(db > -32, `${PRESETS[i].name}: ${db.toFixed(1)} dBFS momentary`));
+  const median = presets.slice().sort((a, b) => a - b)[3];
+  const r = (() => { let s = 99; return () => ((s = (s * 1103515245 + 12345) >>> 0) / 4294967296); })();
+  let worst = -Infinity;
+  for (let trial = 0; trial < 60; trial++) {
+    const bytes = Array.from({ length: PARAM_COUNT }, () => (trial % 2 ? Math.floor(r() * 256) : r() < 0.5 ? 0 : 255));
+    const { values } = decodePatch(`1.${bytesToB64url(bytes)}`);
+    worst = Math.max(worst, level(values, Array.from({ length: 8 }, () => 36 + Math.floor(r() * 60)), 127, 1));
+  }
+  // The previous build (no compressor) measured a 14 dB gap here.
+  assert.ok(worst - median < 9, `dense patches ${worst.toFixed(1)} dBFS vs preset median ${median.toFixed(1)} dBFS`);
+});
+
+test('a fader drag makes no zipper noise: level edits are smoothed every sample', () => {
+  // OP1 level dragged from 99 to 40 in 4-step jumps, one per 60 Hz UI frame.
+  const { x, render, setPatch } = loadEngine();
+  x.sideband_init(SR);
+  const v = defaultValues();
+  v[paramId(0, 'r4')] = 99;
+  setPatch(v);
+  x.sideband_set_volume(1);
+  x.sideband_note_on(69, 127);
+  render(SR / 2);
+  const mon = new Float32Array(128 * 187); // about half a second
+  const every = Math.round((0.0167 * SR) / 128);
+  let lvl = 99;
+  for (let b = 0; b < mon.length / 128; b++) {
+    if (b % every === 0 && lvl > 40) { lvl = Math.max(40, lvl - 4); x.sideband_set_param(paramId(0, 'level'), lvl); }
+    mon.set(render(128).mon, b * 128);
+  }
+  const mag = spectrum(mon, 0, 16384);
+  let on = 0, off = 0;
+  for (let i = 1; i < mag.length; i++) {
+    const p = mag[i] ** 2;
+    if (Math.abs((i * SR) / 16384 - 440) < 30) on += p; else off += p;
+  }
+  const db = 10 * Math.log10(off / on);
+  // Stepping the level once per 128-sample block measured -21.6 dB here.
+  assert.ok(db < -40, `energy outside 440 +- 30 Hz is ${db.toFixed(1)} dB re the carrier`);
 });
 
 test('the default volume is -12 dB and fades in from silence', () => {
