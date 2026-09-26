@@ -1,0 +1,20 @@
+{
+  "name": "op-six",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A six-operator FM synth, written in C, running in your browser's audio thread.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "npm run test:c && npm run build && npm run test:js",
+    "test:c": "node scripts/test-c.mjs",
+    "test:js": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "serve": "node scripts/serve.mjs",
+    "bench": "node scripts/bench.mjs",
+    "shots": "node scripts/shots.mjs"
+  }
+}
