@@ -152,6 +152,37 @@ test('phone, 400 px, light theme, reduced motion: no horizontal scroll and a slo
   }
 });
 
+// The dock is fixed to the bottom of the window. Focusing a control scrolls it
+// into view, and without scroll padding the browser parks it right behind the
+// dock, so a keyboard user loses track of where focus is.
+const hiddenFocus = `(() => {
+  const dock = document.getElementById('dock');
+  const stops = [...document.querySelectorAll('a[href], button, input, [tabindex]')]
+    .filter((e) => e.tabIndex >= 0 && !e.disabled && !dock.contains(e) && e.getClientRects().length);
+  const hidden = [];
+  for (const e of stops) {
+    e.focus();
+    const r = e.getBoundingClientRect();
+    if (Math.min(r.bottom, dock.getBoundingClientRect().top) - Math.max(r.top, 0) <= 0) hidden.push(e.id || e.className);
+  }
+  return JSON.stringify({ stops: stops.length, hidden });
+})()`;
+
+for (const [label, opts] of [['1280×800', { width: 1280, height: 800 }], ['400 px phone', { width: 400, height: 860, mobile: true, scale: 2 }]]) {
+  test(`keyboard focus is never hidden behind the dock (${label})`, { skip: plan.skip }, async () => {
+    if (plan.fail) assert.fail(plan.fail);
+    const page = await open(opts);
+    try {
+      const r = JSON.parse(await page.evaluate(hiddenFocus));
+      assert.ok(r.stops > 80, `found ${r.stops} focus stops`);
+      assert.deepEqual(r.hidden, [], `${r.hidden.length} of ${r.stops} focused controls sat behind the dock`);
+      noProblems(page, label);
+    } finally {
+      await page.close();
+    }
+  });
+}
+
 test('phone, strict autoplay: the first tap on a key unlocks audio and sounds that note', { skip: plan.skip }, async () => {
   if (plan.fail) assert.fail(plan.fail);
   const page = await chrome.openPage({ width: 400, height: 860, mobile: true, scale: 2, scheme: 'dark' });

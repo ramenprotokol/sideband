@@ -56,7 +56,11 @@
 *::before,
 *::after { box-sizing: border-box; }
 
-html { -webkit-text-size-adjust: 100%; }
+html {
+  -webkit-text-size-adjust: 100%;
+  /* Focus and scrollIntoView stop above the fixed dock, not behind it. */
+  scroll-padding-bottom: calc(var(--dock-h) + 12px);
+}
 
 body {
   margin: 0;
