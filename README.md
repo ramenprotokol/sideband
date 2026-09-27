@@ -2,6 +2,8 @@
 
 **A six-operator FM synth, written in C, running in your browser's audio thread.**
 
+**Live:** https://sideband-3ds.pages.dev
+
 sideband is made in the tradition of 1980s six-operator FM synths. The name comes from FM itself: when one operator modulates another, new partials called *sidebands* appear either side of the carrier, and that is where every tone here comes from. It is dressed as a page from a 1983 service manual: a teal panel with white silkscreen (or, in the light theme, the printed manual page itself), operators drawn as schematic blocks, algorithms drawn as line diagrams, and a phosphor-green oscilloscope with real persistence.
 
 ![sideband: the output monitor with a brass chord on the oscilloscope and spectrum, and the keybed below](docs/screenshot.png)
