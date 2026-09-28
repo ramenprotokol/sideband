@@ -100,17 +100,17 @@ What the tests cover:
 - **JS tests** (`node --test`):
   - link round trips, clamping, and hostile links (22,000 random or malformed links, all bounded and safe); name cleaning; MIDI parsing;
   - offline render of the real `dist/sideband.wasm` in Node: JS and C parameter specs agree, the drawn algorithms match the compiled routing, the golden hash matches the native build, A4 peaks at 440 Hz, every preset peaks on its key and stays under the ceiling, BASS keeps harmonics 2–5 within 12 dB of its fundamental, hostile patches at full volume stay under the ceiling, the loudness gap above, and a simulated fader drag (−47.8 dB of zipper sidebands; stepping once per block measured −21.6 dB);
-  - `dist/` contents, headers and CSP, THIRD-PARTY-NOTICES, no bare deploy scripts;
+  - `dist/` contents, headers and CSP, THIRD-PARTY-NOTICES, no bare deploy scripts; no Google Fonts reference anywhere in `dist/`, and every self-hosted font file present and used by the stylesheet;
   - WCAG AA contrast for every text colour pairing in both themes;
-  - headless Chrome (audio muted): no console errors at 1280 px and at a true 400 px phone width (device emulation), both themes, reduced motion; keyboard focus never lands behind the fixed dock at either width; Start runs the worklet (its meter messages prove the C engine is rendering); keys play; links clamp or fail politely; MIDI denial is handled; and, under the strict autoplay policy (`--autoplay-policy=document-user-activation-required`) with touch emulation, the very first tap on a key unlocks the audio and plays that note.
+  - headless Chrome (audio muted): no console errors at 1280 px and at a true 400 px phone width (device emulation), both themes, reduced motion; keyboard focus never lands behind the fixed dock at either width; Start runs the worklet (its meter messages prove the C engine is rendering); keys play; links clamp or fail politely; MIDI denial is handled; every request stays on the site, with each font face loaded from it; and, under the strict autoplay policy (`--autoplay-policy=document-user-activation-required`) with touch emulation, the very first tap on a key unlocks the audio and plays that note.
 
 The browser test proves the audio graph runs and meters; it cannot prove what a speaker plays, because the audio is muted in headless Chrome.
 
 ## Cloudflare (free tier)
 
-sideband is a static site: `dist/` is about 120 KB in 16 files, all served as Cloudflare Pages static assets (free, unlimited requests, 20,000 files and 25 MiB per file). There is no Worker and no server logic; the DSP runs in the visitor's browser. `wrangler.toml` sets `pages_build_output_dir = "dist"` and carries no account id.
+sideband is a static site: `dist/` is about 186 KB in 21 files, all served as Cloudflare Pages static assets (free, unlimited requests, 20,000 files and 25 MiB per file). There is no Worker and no server logic; the DSP runs in the visitor's browser. `wrangler.toml` sets `pages_build_output_dir = "dist"` and carries no account id.
 
-`dist/_headers` sets a strict Content-Security-Policy (`script-src 'self' 'wasm-unsafe-eval'`, no inline code), and `Cache-Control: no-cache` so browsers revalidate the unhashed files instead of caching them for long. SharedArrayBuffer is not used, so no cross-origin isolation headers are needed.
+`dist/_headers` sets a strict Content-Security-Policy (`script-src 'self' 'wasm-unsafe-eval'`, `style-src 'self'`, `font-src 'self'`, no inline code), and `Cache-Control: no-cache` so browsers revalidate the unhashed files (the fonts included) instead of caching them for long. SharedArrayBuffer is not used, so no cross-origin isolation headers are needed.
 
 For readers, the plain command would be `wrangler pages deploy dist --project-name sideband`. The owner deploys through a guarded script instead, so the repo contains no deploy script.
 
@@ -126,7 +126,7 @@ For readers, the plain command would be `wrangler pages deploy dist --project-na
 - The engine runs at 8 to 384 kHz; an audio device outside that range gets a clear message instead of an out-of-tune synth.
 - The C engine allocates nothing, and neither does the worklet's `process()`: samples are copied with plain loops, and the meter message reuses one object (`postMessage` still copies it, about 20 times a second).
 - Tested in headless Chrome only. Other browsers with AudioWorklet should work but have not been checked.
-- The page loads IBM Plex from Google Fonts; everything else is same-origin.
+- Everything, the IBM Plex fonts included, is served from the site itself; the page requests nothing from anywhere else. The fonts are the Latin subsets, so the few symbols outside them (♯, ↺, ▸) are drawn from the system's fonts.
 - On narrow screens the MIDI button is hidden and the routine status line is visually hidden (errors still show) to keep the dock compact.
 
 ## Next
@@ -139,7 +139,7 @@ For readers, the plain command would be `wrangler pages deploy dist --project-na
 
 ## Third-party notices
 
-No third-party code is compiled or bundled into `dist/`. The fonts are loaded from Google Fonts and are not copied into the site. [`web/THIRD-PARTY-NOTICES.txt`](web/THIRD-PARTY-NOTICES.txt) (shipped as `dist/THIRD-PARTY-NOTICES.txt` and linked from the page) records this, with the fonts' licence (SIL Open Font License 1.1).
+No third-party code is compiled or bundled into `dist/`. The only third-party files are the IBM Plex fonts in `web/fonts/` (the Latin-subset WOFF2 files Google Fonts serves, unmodified; SIL Open Font License 1.1), which ship in `dist/fonts/`. [`web/THIRD-PARTY-NOTICES.txt`](web/THIRD-PARTY-NOTICES.txt) (shipped as `dist/THIRD-PARTY-NOTICES.txt` and linked from the page) records this, with each font file, its version and copyright lines, and the full licence text.
 
 ## Credits
 

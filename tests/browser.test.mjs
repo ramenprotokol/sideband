@@ -8,7 +8,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { serve } from '../scripts/serve.mjs';
 import { browserPlan, findChrome, launchChrome } from './cdp.mjs';
-import { dist } from './helpers.mjs';
+import { FONT_FILES, dist } from './helpers.mjs';
 import { PARAM_COUNT, bytesToB64url } from '../web/js/patch.js';
 
 const chromePath = findChrome();
@@ -121,6 +121,32 @@ test('desktop: loads clean, Start runs the C engine in the AudioWorklet, keys pl
     await page.click('#start');
     await page.waitFor('window.__sideband.engine.ctx.state === "running"', 5000);
     noProblems(page, 'desktop');
+  } finally {
+    await page.close();
+  }
+});
+
+test('every request stays on this site, every font face loads from it, and the console stays clean', { skip: plan.skip }, async () => {
+  if (plan.fail) assert.fail(plan.fail);
+  const page = await open({ width: 1280, height: 800, scheme: 'dark' });
+  try {
+    const faces = [
+      '400 16px "IBM Plex Mono"',
+      '500 16px "IBM Plex Mono"',
+      '600 16px "IBM Plex Mono"',
+      '400 16px "IBM Plex Sans Condensed"',
+      '500 16px "IBM Plex Sans Condensed"',
+    ];
+    await page.evaluate(`Promise.all(${JSON.stringify(faces)}.map((f) => document.fonts.load(f, 'sideband'))).then(() => document.fonts.ready).then(() => true)`);
+    const urls = await page.evaluate('performance.getEntriesByType("resource").map((e) => e.name)');
+    assert.deepEqual(urls.filter((u) => !u.startsWith(base)), [], 'no request left this site');
+    for (const f of faces) assert.equal(await page.evaluate(`document.fonts.check(${JSON.stringify(f)}, 'sideband')`), true, `document.fonts.check(${f})`);
+    const declared = await page.evaluate('[...document.fonts].map((f) => `${f.family.replace(/"/g, "")} ${f.weight} ${f.status}`)');
+    assert.equal(declared.length, FONT_FILES.length, `one face per font file: ${declared.join(', ')}`);
+    assert.deepEqual(declared.filter((f) => !f.endsWith(' loaded')), [], 'every declared face loaded');
+    const fontUrls = urls.filter((u) => u.endsWith('.woff2')).map((u) => u.slice(base.length)).sort();
+    assert.deepEqual(fontUrls, FONT_FILES.map((f) => `fonts/${f}`), 'each font file fetched from this site');
+    noProblems(page, 'fonts');
   } finally {
     await page.close();
   }

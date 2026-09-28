@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { dist, root } from './helpers.mjs';
+import { FONT_FILES, dist, root } from './helpers.mjs';
 import { globalHeaders } from '../scripts/serve.mjs';
 
 const read = (...p) => readFileSync(join(...p), 'utf8');
@@ -29,12 +29,39 @@ test('dist/ holds the page, the engine and the worklet', () => {
 
 test('THIRD-PARTY-NOTICES.txt ships in dist/ and the page links to it', () => {
   const notices = read(dist, 'THIRD-PARTY-NOTICES.txt');
-  assert.match(notices, /IBM Plex Mono/);
+  assert.match(notices, /IBM Plex Mono 2\.3/);
+  assert.match(notices, /IBM Plex Sans Condensed 1\.3/);
+  assert.ok(notices.includes('Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"'), 'the OFL copyright line');
+  for (const f of FONT_FILES) assert.ok(notices.includes(`fonts/${f}`), `notices list fonts/${f}`);
   assert.match(notices, /SIL Open Font License, Version 1\.1/);
+  assert.equal(notices.split('SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007').length, 2, 'the full OFL 1.1 text, once');
+  assert.match(notices, /PERMISSION & CONDITIONS/);
+  assert.doesNotMatch(notices, /Google Fonts for two typefaces|not copied into\s+this site|googleapis|gstatic/);
   assert.match(notices, /-nostdlib/);
   const html = read(dist, 'index.html');
   assert.match(html, /href="THIRD-PARTY-NOTICES\.txt"/);
   assert.match(read(root, 'README.md'), /THIRD-PARTY-NOTICES/);
+});
+
+test('fonts ship from this site: no Google Fonts in dist/, CSP allows only this site, every font file present and used', async () => {
+  const html = read(dist, 'index.html');
+  const css = read(dist, 'styles.css');
+  const headers = read(dist, '_headers');
+  for (const [name, text] of [['index.html', html], ['styles.css', css], ['_headers', headers]]) {
+    assert.doesNotMatch(text, /googleapis|gstatic|fonts\.google/i, `${name} must not reach Google Fonts`);
+  }
+  const shipped = existsSync(join(dist, 'fonts')) ? readdirSync(join(dist, 'fonts')).filter((f) => f.endsWith('.woff2')).sort() : [];
+  assert.deepEqual(shipped, FONT_FILES, 'dist/fonts/ holds exactly the self-hosted fonts');
+  for (const f of FONT_FILES) {
+    assert.ok(statSync(join(dist, 'fonts', f)).size > 5000, `dist/fonts/${f} is a real font file`);
+    assert.match(css, new RegExp(`url\\(["']?fonts/${f.replace(/\./g, '\\.')}["']?\\)`), `styles.css uses fonts/${f}`);
+  }
+  const h = await globalHeaders(dist);
+  const directives = Object.fromEntries(h['content-security-policy'].split(';').map((d) => d.trim().split(/\s+/)).map(([k, ...v]) => [k, v]));
+  assert.deepEqual(directives['style-src'], ["'self'"]);
+  assert.deepEqual(directives['font-src'], ["'self'"]);
+  // The font files are not content-hashed, so they get the same revalidating no-cache as everything else.
+  assert.equal(h['cache-control'], 'no-cache');
 });
 
 test('_headers: a strict CSP, and no long cache on unhashed files', async () => {
@@ -79,7 +106,7 @@ test('no local absolute paths or build output in tracked sources', () => {
   const files = walk(root, new Set(['.git', 'node_modules', 'dist', 'build', 'docs']));
   const home = /\/(Users|home)\/[a-z]/i;
   for (const f of files) {
-    if (/\.(png|wasm)$/.test(f)) continue;
+    if (/\.(png|wasm|woff2)$/.test(f)) continue;
     assert.doesNotMatch(read(f), home, `${relative(root, f)} contains a local path`);
   }
   const ignore = read(root, '.gitignore');

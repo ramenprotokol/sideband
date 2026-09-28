@@ -5,6 +5,15 @@ import { fileURLToPath } from 'node:url';
 export const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const dist = join(root, 'dist');
 
+// The self-hosted fonts (web/fonts/, Latin subsets) that dist/fonts/ must ship.
+export const FONT_FILES = [
+  'ibm-plex-mono-400.woff2',
+  'ibm-plex-mono-500.woff2',
+  'ibm-plex-mono-600.woff2',
+  'ibm-plex-sans-condensed-400.woff2',
+  'ibm-plex-sans-condensed-500.woff2',
+];
+
 // A fresh instance of the built engine (npm test builds dist/ first).
 export function loadEngine() {
   const bytes = readFileSync(join(dist, 'sideband.wasm'));
